@@ -1,0 +1,21 @@
+{
+    # Глобальные настройки
+    admin off
+    log {
+        output file /var/log/access.log
+        level INFO
+    }
+}
+
+:80 {
+    root * /app/public
+
+    # Новый синтаксис для FrankenPHP
+    php_server {
+        root /app/public
+        split .php
+        index index.php
+    }
+
+    file_server
+}

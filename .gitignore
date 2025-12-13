@@ -1,0 +1,53 @@
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Laravel
+backend/.env
+backend/vendor/
+backend/storage/framework/cache/
+backend/storage/framework/views/
+backend/storage/logs/laravel.log
+backend/bootstrap/cache/
+backend/public/storage
+backend/public/hot
+*.log
+.env.*.local
+
+# Node/JavaScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp/
+.pnp.js
+
+# Frontend
+dist/
+dist-ssr/
+*.local
+
+# Testing
+backend/coverage/
+.nyc_output
+
+# Docker
+docker-compose.override.yml
+
+# Database
+*.sqlite
+*.sqlite-journal
+
+# Composer
+backend/composer.phar
+
+# PHP
+.phpunit.result.cache
+backend/.php-cs-fixer.cache
