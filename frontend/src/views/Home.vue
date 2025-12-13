@@ -10,18 +10,62 @@
         <p class="hero-subtitle">Контролируйте доходы и расходы с умом</p>
         <div class="hero-stats">
           <div class="hero-stat">
-            <div class="stat-value">{{ formatMoney(stats.totalIncome) }}</div>
-            <div class="stat-label">Общий доход</div>
+            <div class="stat-value">{{ formatMoney(stats.monthlyIncome) }}</div>
+            <div class="stat-label">Доходы за месяц</div>
           </div>
           <div class="hero-stat">
-            <div class="stat-value">{{ formatMoney(stats.totalExpenses) }}</div>
-            <div class="stat-label">Общие расходы</div>
+            <div class="stat-value">{{ formatMoney(stats.monthlyExpenses) }}</div>
+            <div class="stat-label">Расходы за месяц</div>
+          </div>
+          <div class="hero-stat">
+            <div class="stat-value" :class="balanceClass">{{ formatMoney(stats.monthlyBalance) }}</div>
+            <div class="stat-label">Баланс месяца</div>
           </div>
         </div>
       </div>
-      <div class="hero-illustration">
-        <div class="illustration-circle"></div>
-        <div class="illustration-graph"></div>
+    </div>
+
+    <!-- Last 3 Months Stats -->
+    <div class="period-stats-section" v-if="monthlyStats.length > 0">
+      <h2 class="section-title">Статистика за последние 3 месяца</h2>
+      <div class="period-stats-grid">
+        <div class="period-stat-card" v-for="(monthStat, index) in monthlyStats" :key="index">
+          <div class="period-stat-header">
+            <h3 class="period-stat-month">{{ formatMonth(monthStat.month) }}</h3>
+            <div class="period-stat-total" :class="getBalanceClass(monthStat.balance)">
+              {{ formatMoney(monthStat.balance) }}
+            </div>
+          </div>
+
+          <div class="period-stat-details">
+            <div class="period-stat-item income">
+              <div class="period-stat-label">
+                <div class="period-stat-dot income"></div>
+                Доходы
+              </div>
+              <div class="period-stat-amount">{{ formatMoney(monthStat.income) }}</div>
+            </div>
+
+            <div class="period-stat-item expense">
+              <div class="period-stat-label">
+                <div class="period-stat-dot expense"></div>
+                Расходы
+              </div>
+              <div class="period-stat-amount">{{ formatMoney(monthStat.expenses) }}</div>
+            </div>
+          </div>
+
+          <div class="period-stat-progress">
+            <div class="progress-bar">
+              <div class="progress-income" :style="{ width: monthStat.incomePercentage + '%' }"></div>
+              <div class="progress-expense" :style="{ width: monthStat.expensesPercentage + '%' }"></div>
+            </div>
+            <div class="progress-labels">
+              <span>{{ Math.round(monthStat.incomePercentage) }}% доходы</span>
+              <span>{{ Math.round(monthStat.expensesPercentage) }}% расходы</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -36,17 +80,11 @@
               <path d="M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             </svg>
           </div>
-          <div class="stat-trend" v-if="stats.incomeTrend">
-            <span :class="stats.incomeTrend >= 0 ? 'trend-up' : 'trend-down'">
-              {{ stats.incomeTrend >= 0 ? '↗' : '↘' }}
-              {{ Math.abs(stats.incomeTrend) }}%
-            </span>
-          </div>
         </div>
         <div class="stat-card-content">
-          <h3 class="stat-title">Доходы</h3>
+          <h3 class="stat-title">Все доходы</h3>
           <div class="stat-amount">{{ formatMoney(stats.totalIncome) }}</div>
-          <div class="stat-period">текущий месяц</div>
+          <div class="stat-period">за все время</div>
         </div>
       </div>
 
@@ -59,21 +97,15 @@
               <path d="M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             </svg>
           </div>
-          <div class="stat-trend" v-if="stats.expenseTrend">
-            <span :class="stats.expenseTrend <= 0 ? 'trend-up' : 'trend-down'">
-              {{ stats.expenseTrend <= 0 ? '↘' : '↗' }}
-              {{ Math.abs(stats.expenseTrend) }}%
-            </span>
-          </div>
         </div>
         <div class="stat-card-content">
-          <h3 class="stat-title">Расходы</h3>
+          <h3 class="stat-title">Все расходы</h3>
           <div class="stat-amount">{{ formatMoney(stats.totalExpenses) }}</div>
-          <div class="stat-period">текущий месяц</div>
+          <div class="stat-period">за все время</div>
         </div>
       </div>
 
-      <div class="stat-card stat-balance" :class="balanceClass">
+      <div class="stat-card stat-total-balance" :class="totalBalanceClass">
         <div class="stat-card-header">
           <div class="stat-icon">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -83,16 +115,11 @@
               <line x1="15" y1="9" x2="15.01" y2="9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             </svg>
           </div>
-          <div class="stat-trend">
-            <span :class="balanceClass">
-              {{ stats.balance >= 0 ? '😊' : '😔' }}
-            </span>
-          </div>
         </div>
         <div class="stat-card-content">
-          <h3 class="stat-title">Баланс</h3>
-          <div class="stat-amount">{{ formatMoney(stats.balance) }}</div>
-          <div class="stat-period">текущий остаток</div>
+          <h3 class="stat-title">Общий баланс</h3>
+          <div class="stat-amount">{{ formatMoney(totalBalance) }}</div>
+          <div class="stat-period">за все время</div>
         </div>
       </div>
     </div>
@@ -101,7 +128,7 @@
     <div class="quick-actions-section">
       <h2 class="section-title">Быстрые действия</h2>
       <div class="actions-grid">
-        <router-link to="/transactions/add" class="action-card action-primary">
+        <router-link to="/transactions/create?type=income" class="action-card">
           <div class="action-icon">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M12 5V19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -109,8 +136,25 @@
             </svg>
           </div>
           <div class="action-content">
-            <h4>Добавить транзакцию</h4>
-            <p>Записать новый доход или расход</p>
+            <h4>Добавить доход</h4>
+            <p>Записать поступление средств</p>
+          </div>
+          <div class="action-arrow">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+          </div>
+        </router-link>
+
+        <router-link to="/transactions/create?type=expense" class="action-card">
+          <div class="action-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          </div>
+          <div class="action-content">
+            <h4>Добавить расход</h4>
+            <p>Записать трату средств</p>
           </div>
           <div class="action-arrow">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -146,26 +190,7 @@
           </div>
           <div class="action-content">
             <h4>Категории</h4>
-            <p>Управление категориями расходов</p>
-          </div>
-          <div class="action-arrow">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M5 12h14M12 5l7 7-7 7"/>
-            </svg>
-          </div>
-        </router-link>
-
-        <router-link to="/analytics" class="action-card">
-          <div class="action-icon">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <polyline points="3.27 6.96 12 12.01 20.73 6.96" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <line x1="12" y1="22.08" x2="12" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </div>
-          <div class="action-content">
-            <h4>Аналитика</h4>
-            <p>Статистика и финансовые отчеты</p>
+            <p>Управление категориями</p>
           </div>
           <div class="action-arrow">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -202,7 +227,7 @@
         </div>
         <h3>Транзакций пока нет</h3>
         <p>Начните отслеживать свои финансы прямо сейчас</p>
-        <router-link to="/transactions/add" class="btn btn-primary btn-large">
+        <router-link to="/transactions/create" class="btn btn-primary btn-large">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 5v14M5 12h14"/>
           </svg>
@@ -210,16 +235,17 @@
         </router-link>
       </div>
 
-      <div v-else class="transactions-grid">
+      <div v-else class="transactions-list">
         <div
             v-for="transaction in recentTransactions"
             :key="transaction.id"
             class="transaction-card"
-            @click="viewTransaction(transaction)"
+            @click="editTransaction(transaction)"
         >
           <div class="transaction-header">
-            <div class="transaction-category" :style="{ backgroundColor: transaction.category.color }">
-              {{ transaction.category.name.charAt(0) }}
+            <div class="category-badge" :style="{ backgroundColor: transaction.category.color + '20' }">
+              <div class="category-color" :style="{ backgroundColor: transaction.category.color }"></div>
+              <span class="category-name">{{ transaction.category.name }}</span>
             </div>
             <div class="transaction-type" :class="transaction.type">
               <span>{{ transaction.type === 'income' ? 'Доход' : 'Расход' }}</span>
@@ -230,58 +256,22 @@
             <h4 class="transaction-description">
               {{ transaction.description || 'Без описания' }}
             </h4>
-            <div class="transaction-meta">
-              <span class="transaction-date">{{ formatDate(transaction.date) }}</span>
-              <span class="transaction-category-name" :style="{ color: transaction.category.color }">
-                {{ transaction.category.name }}
-              </span>
+            <div class="transaction-date">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                <line x1="16" y1="2" x2="16" y2="6"/>
+                <line x1="8" y1="2" x2="8" y2="6"/>
+                <line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+              {{ formatDate(transaction.date) }}
             </div>
           </div>
 
-          <div class="transaction-amount" :class="transaction.type">
-            <span class="amount-sign">{{ transaction.type === 'income' ? '+' : '-' }}</span>
-            {{ formatMoney(transaction.amount) }}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Recommendations -->
-    <div v-if="recommendations.length > 0" class="recommendations-section">
-      <div class="section-header">
-        <h2 class="section-title">Рекомендации</h2>
-        <div class="recommendations-count">{{ recommendations.length }}</div>
-      </div>
-
-      <div class="recommendations-grid">
-        <div
-            v-for="(rec, index) in recommendations"
-            :key="index"
-            class="recommendation-card"
-            :class="rec.type"
-        >
-          <div class="recommendation-icon">
-            <svg v-if="rec.type === 'critical'" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 9V12M12 15H12.01M5.07183 19H18.9282C20.4678 19 21.4301 17.3333 20.6603 16L13.7321 4C12.9623 2.66667 11.0377 2.66667 10.2679 4L3.33975 16C2.56995 17.3333 3.53223 19 5.07183 19Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <svg v-else-if="rec.type === 'warning'" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 8V12M12 16H12.01M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <svg v-else width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M22 11.08V12C21.9988 14.1564 21.3005 16.2547 20.0093 17.9818C18.7182 19.709 16.9033 20.9725 14.8354 21.5839C12.7674 22.1953 10.5573 22.1219 8.53447 21.3746C6.51168 20.6273 4.78465 19.2461 3.61096 17.4371C2.43727 15.628 1.87979 13.4881 2.02168 11.3363C2.16356 9.18455 2.99721 7.13631 4.39828 5.49706C5.79935 3.85781 7.69279 2.71537 9.79619 2.24013C11.8996 1.7649 14.1003 1.98232 16.07 2.85999" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M22 4L12 14.01L9 11.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-
-          <div class="recommendation-content">
-            <h4>{{ rec.title }}</h4>
-            <p>{{ rec.message }}</p>
-          </div>
-
-          <div class="recommendation-action" v-if="rec.action">
-            <button class="btn btn-small" :class="rec.type === 'success' ? 'btn-primary' : 'btn-secondary'">
-              {{ rec.action }}
-            </button>
+          <div class="transaction-amount-container">
+            <div class="transaction-amount" :class="transaction.type">
+              <span class="amount-sign">{{ transaction.type === 'income' ? '+' : '-' }}</span>
+              {{ formatMoney(transaction.amount) }}
+            </div>
           </div>
         </div>
       </div>
@@ -302,92 +292,200 @@ export default {
     const stats = ref({
       totalIncome: 0,
       totalExpenses: 0,
-      balance: 0,
-      incomeTrend: null,
-      expenseTrend: null
+      monthlyIncome: 0,
+      monthlyExpenses: 0,
+      monthlyBalance: 0
     })
 
+    const monthlyStats = ref([])
     const recentTransactions = ref([])
-    const recommendations = ref([])
     const loading = ref(true)
 
+    // Компьютед свойства
+    const totalBalance = computed(() => {
+      return stats.value.totalIncome - stats.value.totalExpenses
+    })
+
     const balanceClass = computed(() => {
-      if (stats.value.balance > 0) return 'positive'
-      if (stats.value.balance < 0) return 'negative'
+      const balance = stats.value.monthlyBalance
+      if (balance > 0) return 'positive'
+      if (balance < 0) return 'negative'
+      return 'neutral'
+    })
+
+    const totalBalanceClass = computed(() => {
+      const balance = totalBalance.value
+      if (balance > 0) return 'positive'
+      if (balance < 0) return 'negative'
       return 'neutral'
     })
 
     const fetchDashboardData = async () => {
       try {
         loading.value = true
+        console.log('Загрузка данных дашборда...')
 
-        const currentDate = new Date()
-        const params = {
-          month: currentDate.getMonth() + 1,
-          year: currentDate.getFullYear()
-        }
-
-        const [analyticsResponse, transactionsResponse] = await Promise.all([
-          axios.get('/api/analytics/overview', { params }),
+        // 1. Получаем все транзакции для расчета статистики
+        const [transactionsResponse, recentResponse] = await Promise.all([
+          axios.get('/api/transactions'),
           axios.get('/api/transactions/recent', {
-            params: { limit: 4 }
+            params: { limit: 6 }
           })
         ])
 
-        const analytics = analyticsResponse.data.data || {}
+        console.log('Ответ транзакций:', transactionsResponse.data)
+        console.log('Ответ последних транзакций:', recentResponse.data)
+
+        const allTransactions = transactionsResponse.data.data || transactionsResponse.data || []
+        const recentTransactionsData = recentResponse.data.data || recentResponse.data || []
+
+        // 2. Вручную рассчитываем статистику из всех транзакций
+        let totalIncome = 0
+        let totalExpenses = 0
+        let monthlyIncome = 0
+        let monthlyExpenses = 0
+
+        // Для статистики по месяцам
+        const monthlyData = {}
+        const currentDate = new Date()
+        const currentMonth = currentDate.getMonth() + 1
+        const currentYear = currentDate.getFullYear()
+
+        // Перебираем все транзакции
+        allTransactions.forEach(transaction => {
+          const amount = parseFloat(transaction.amount) || 0
+          const transactionDate = new Date(transaction.date)
+          const transactionMonth = transactionDate.getMonth() + 1
+          const transactionYear = transactionDate.getFullYear()
+
+          const monthKey = `${transactionYear}-${String(transactionMonth).padStart(2, '0')}`
+
+          if (!monthlyData[monthKey]) {
+            monthlyData[monthKey] = {
+              income: 0,
+              expenses: 0,
+              month: monthKey
+            }
+          }
+
+          if (transaction.type === 'income') {
+            totalIncome += amount
+            monthlyData[monthKey].income += amount
+
+            if (transactionMonth === currentMonth && transactionYear === currentYear) {
+              monthlyIncome += amount
+            }
+          } else if (transaction.type === 'expense') {
+            totalExpenses += amount
+            monthlyData[monthKey].expenses += amount
+
+            if (transactionMonth === currentMonth && transactionYear === currentYear) {
+              monthlyExpenses += amount
+            }
+          }
+        })
+
+        // 3. Устанавливаем статистику
         stats.value = {
-          totalIncome: analytics.total_income || 0,
-          totalExpenses: analytics.total_expenses || 0,
-          balance: analytics.balance || 0,
-          incomeTrend: analytics.income_trend || null,
-          expenseTrend: analytics.expense_trend || null
+          totalIncome,
+          totalExpenses,
+          monthlyIncome,
+          monthlyExpenses,
+          monthlyBalance: monthlyIncome - monthlyExpenses
         }
 
-        recommendations.value = analytics.recommendations || []
-        recentTransactions.value = transactionsResponse.data.data || []
+        console.log('Рассчитанная статистика:', stats.value)
+
+        // 4. Обрабатываем статистику за последние 3 месяца
+        const sortedMonths = Object.keys(monthlyData).sort().reverse().slice(0, 3)
+        monthlyStats.value = sortedMonths.map(monthKey => {
+          const data = monthlyData[monthKey]
+          const total = data.income + data.expenses
+          const incomePercentage = total > 0 ? (data.income / total) * 100 : 0
+          const expensesPercentage = total > 0 ? (data.expenses / total) * 100 : 0
+
+          return {
+            ...data,
+            balance: data.income - data.expenses,
+            incomePercentage,
+            expensesPercentage
+          }
+        })
+
+        console.log('Статистика по месяцам:', monthlyStats.value)
+
+        // 5. Обрабатываем последние транзакции
+        recentTransactions.value = recentTransactionsData.map(t => ({
+          id: t.id,
+          amount: t.amount,
+          type: t.type,
+          description: t.description,
+          date: t.date,
+          category: {
+            id: t.category_id,
+            name: t.category?.name || 'Неизвестно',
+            color: t.category?.color || '#94a3b8'
+          }
+        }))
 
       } catch (error) {
         console.error('Error fetching dashboard data:', error)
-        // Mock data for development
+        console.error('Response:', error.response)
+
+        // Fallback данные для разработки
         stats.value = {
-          totalIncome: 125000,
-          totalExpenses: 87500,
-          balance: 37500,
-          incomeTrend: 12.5,
-          expenseTrend: -5.3
+          totalIncome: 12550,
+          totalExpenses: 8500,
+          monthlyIncome: 3500,
+          monthlyExpenses: 4200,
+          monthlyBalance: -700
         }
 
-        recommendations.value = [
+        // Fallback статистика по месяцам
+        const currentDate = new Date()
+        monthlyStats.value = [
           {
-            type: 'success',
-            title: 'Отличный баланс!',
-            message: 'Ваши доходы превышают расходы на 30%',
-            action: 'Посмотреть детали'
+            month: `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`,
+            income: 3500,
+            expenses: 4200,
+            balance: -700,
+            incomePercentage: 45.5,
+            expensesPercentage: 54.5
           },
           {
-            type: 'warning',
-            title: 'Высокие траты на еду',
-            message: 'Вы потратили 45% бюджета на еду в этом месяце',
-            action: 'Скорректировать'
+            month: `${currentDate.getFullYear()}-${String(currentDate.getMonth()).padStart(2, '0')}`,
+            income: 4500,
+            expenses: 2300,
+            balance: 2200,
+            incomePercentage: 66.2,
+            expensesPercentage: 33.8
+          },
+          {
+            month: `${currentDate.getFullYear()}-${String(currentDate.getMonth() - 1).padStart(2, '0')}`,
+            income: 3000,
+            expenses: 2000,
+            balance: 1000,
+            incomePercentage: 60,
+            expensesPercentage: 40
           }
         ]
 
         recentTransactions.value = [
           {
             id: 1,
-            description: 'Зарплата',
-            amount: 100000,
+            description: 'Тестовый доход',
+            amount: 50,
             type: 'income',
             date: new Date().toISOString(),
-            category: { name: 'Зарплата', color: '#10b981' }
+            category: { name: 'Доход', color: '#10b981' }
           },
           {
             id: 2,
-            description: 'Супермаркет',
-            amount: 7500,
+            description: 'Тестовый расход',
+            amount: 500,
             type: 'expense',
             date: new Date().toISOString(),
-            category: { name: 'Продукты', color: '#f59e0b' }
+            category: { name: 'Расход', color: '#ef4444' }
           }
         ]
       } finally {
@@ -395,53 +493,101 @@ export default {
       }
     }
 
+    const getBalanceClass = (balance) => {
+      if (balance > 0) return 'positive'
+      if (balance < 0) return 'negative'
+      return 'neutral'
+    }
+
     const formatMoney = (amount) => {
-      if (amount === null || amount === undefined) return '0 ₽'
+      if (amount === null || amount === undefined || isNaN(amount)) return '0 Br'
+
+      // Форматирование в белорусских рублях
       return new Intl.NumberFormat('ru-RU', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0
-      }).format(amount) + ' ₽'
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+        style: 'decimal'
+      }).format(amount) + ' Br'
     }
 
     const formatDate = (dateString) => {
-      const date = new Date(dateString)
-      const now = new Date()
-      const diffTime = Math.abs(now - date)
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+      if (!dateString) return 'Дата не указана'
 
-      if (diffDays === 0) return 'Сегодня'
-      if (diffDays === 1) return 'Вчера'
-      if (diffDays <= 7) return `${diffDays} дня назад`
+      try {
+        const date = new Date(dateString)
+        const now = new Date()
+        const diffTime = Math.abs(now - date)
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
 
+        // Если сегодня
+        if (date.toDateString() === now.toDateString()) {
+          return 'Сегодня'
+        }
+
+        // Если вчера
+        const yesterday = new Date(now)
+        yesterday.setDate(yesterday.getDate() - 1)
+        if (date.toDateString() === yesterday.toDateString()) {
+          return 'Вчера'
+        }
+
+        // Если в течение недели
+        if (diffDays <= 7) {
+          return date.toLocaleDateString('ru-RU', {
+            weekday: 'short',
+            day: 'numeric'
+          })
+        }
+
+        // Более недели назад
+        return date.toLocaleDateString('ru-RU', {
+          day: 'numeric',
+          month: 'short',
+          year: diffDays > 365 ? 'numeric' : undefined
+        })
+      } catch (error) {
+        console.error('Error formatting date:', error, dateString)
+        return 'Неверная дата'
+      }
+    }
+
+    const formatMonth = (monthString) => {
+      const [year, month] = monthString.split('-')
+      const date = new Date(year, parseInt(month) - 1, 1)
       return date.toLocaleDateString('ru-RU', {
-        day: 'numeric',
-        month: 'short'
+        month: 'long',
+        year: 'numeric'
       })
     }
 
-    const viewTransaction = (transaction) => {
-      router.push(`/transactions/${transaction.id}`)
+    const editTransaction = (transaction) => {
+      router.push(`/transactions/edit/${transaction.id}`)
     }
 
-    onMounted(() => {
-      fetchDashboardData()
+    onMounted(async () => {
+      await fetchDashboardData()
     })
 
     return {
       stats,
+      monthlyStats,
       recentTransactions,
-      recommendations,
       loading,
+      totalBalance,
       balanceClass,
+      totalBalanceClass,
+      getBalanceClass,
       formatMoney,
       formatDate,
-      viewTransaction
+      formatMonth,
+      editTransaction
     }
   }
 }
 </script>
 
 <style scoped>
+/* Стили остаются такими же как в предыдущем варианте */
 .home {
   max-width: 1200px;
   margin: 0 auto;
@@ -517,9 +663,161 @@ export default {
   margin-bottom: 0.25rem;
 }
 
+.hero-stat .stat-value.positive {
+  color: #4ade80;
+}
+
+.hero-stat .stat-value.negative {
+  color: #f87171;
+}
+
+.hero-stat .stat-value.neutral {
+  color: #e2e8f0;
+}
+
 .hero-stat .stat-label {
   font-size: 0.875rem;
   opacity: 0.8;
+}
+
+/* Period Stats Section */
+.period-stats-section {
+  margin-bottom: 2.5rem;
+}
+
+.period-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.period-stat-card {
+  background: white;
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e2e8f0;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.period-stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+.period-stat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.period-stat-month {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.period-stat-total {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.period-stat-total.positive {
+  color: #16a34a;
+}
+
+.period-stat-total.negative {
+  color: #dc2626;
+}
+
+.period-stat-total.neutral {
+  color: #64748b;
+}
+
+.period-stat-details {
+  margin-bottom: 1.25rem;
+}
+
+.period-stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.period-stat-item:last-child {
+  margin-bottom: 0;
+}
+
+.period-stat-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.period-stat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.period-stat-dot.income {
+  background: #10b981;
+}
+
+.period-stat-dot.expense {
+  background: #ef4444;
+}
+
+.period-stat-amount {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.period-stat-item.income .period-stat-amount {
+  color: #10b981;
+}
+
+.period-stat-item.expense .period-stat-amount {
+  color: #ef4444;
+}
+
+.period-stat-progress {
+  margin-top: 1.25rem;
+}
+
+.progress-bar {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+  display: flex;
+}
+
+.progress-income {
+  background: #10b981;
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.progress-expense {
+  background: #ef4444;
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #64748b;
 }
 
 /* Dashboard Stats */
@@ -563,15 +861,15 @@ export default {
   background: linear-gradient(90deg, #ef4444 0%, #f87171 100%);
 }
 
-.stat-balance.positive::before {
-  background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
+.stat-total-balance.positive::before {
+  background: linear-gradient(90deg, #16a34a 0%, #22c55e 100%);
 }
 
-.stat-balance.negative::before {
+.stat-total-balance.negative::before {
   background: linear-gradient(90deg, #ef4444 0%, #f87171 100%);
 }
 
-.stat-balance.neutral::before {
+.stat-total-balance.neutral::before {
   background: linear-gradient(90deg, #64748b 0%, #94a3b8 100%);
 }
 
@@ -601,32 +899,19 @@ export default {
   color: #ef4444;
 }
 
-.stat-balance.positive .stat-icon {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3b82f6;
+.stat-total-balance.positive .stat-icon {
+  background: rgba(22, 163, 74, 0.1);
+  color: #16a34a;
 }
 
-.stat-balance.negative .stat-icon {
+.stat-total-balance.negative .stat-icon {
   background: rgba(239, 68, 68, 0.1);
   color: #ef4444;
 }
 
-.stat-balance.neutral .stat-icon {
+.stat-total-balance.neutral .stat-icon {
   background: rgba(100, 116, 139, 0.1);
   color: #64748b;
-}
-
-.stat-trend {
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.trend-up {
-  color: #10b981;
-}
-
-.trend-down {
-  color: #ef4444;
 }
 
 .stat-title {
@@ -646,15 +931,15 @@ export default {
   margin-bottom: 0.25rem;
 }
 
-.stat-balance.positive .stat-amount {
-  color: #3b82f6;
+.stat-total-balance.positive .stat-amount {
+  color: #16a34a;
 }
 
-.stat-balance.negative .stat-amount {
-  color: #ef4444;
+.stat-total-balance.negative .stat-amount {
+  color: #dc2626;
 }
 
-.stat-balance.neutral .stat-amount {
+.stat-total-balance.neutral .stat-amount {
   color: #64748b;
 }
 
@@ -701,11 +986,6 @@ export default {
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
 }
 
-.action-card.action-primary {
-  border-color: #3b82f6;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(59, 130, 246, 0.02) 100%);
-}
-
 .action-icon {
   width: 48px;
   height: 48px;
@@ -718,7 +998,7 @@ export default {
   flex-shrink: 0;
 }
 
-.action-card.action-primary .action-icon {
+.action-card:hover .action-icon {
   background: #3b82f6;
   color: white;
 }
@@ -824,10 +1104,11 @@ export default {
   margin-bottom: 1.5rem;
 }
 
-.transactions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.25rem;
+/* Transactions List */
+.transactions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .transaction-card {
@@ -838,7 +1119,9 @@ export default {
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .transaction-card:hover {
@@ -851,25 +1134,37 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
 }
 
-.transaction-category {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+.category-badge {
   display: flex;
   align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: 600;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 20px;
+  background: #f8fafc;
+}
+
+.category-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.category-name {
   font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
 }
 
 .transaction-type {
   font-size: 0.75rem;
   font-weight: 600;
-  padding: 0.25rem 0.5rem;
+  padding: 0.25rem 0.75rem;
   border-radius: 12px;
 }
 
@@ -883,32 +1178,40 @@ export default {
   color: #ef4444;
 }
 
+.transaction-content {
+  flex: 1;
+}
+
 .transaction-description {
   font-size: 1rem;
   font-weight: 600;
   color: #1e293b;
-  margin: 0 0 0.75rem 0;
+  margin: 0 0 0.5rem 0;
   line-height: 1.3;
+  word-break: break-word;
 }
 
-.transaction-meta {
+.transaction-date {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 0.375rem;
   font-size: 0.75rem;
   color: #64748b;
+  font-weight: 500;
 }
 
-.transaction-category-name {
-  font-weight: 600;
+.transaction-date svg {
+  flex-shrink: 0;
+}
+
+.transaction-amount-container {
+  text-align: right;
 }
 
 .transaction-amount {
-  position: absolute;
-  bottom: 1.25rem;
-  right: 1.25rem;
   font-size: 1.125rem;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .transaction-amount.income {
@@ -922,98 +1225,6 @@ export default {
 .amount-sign {
   font-size: 0.875rem;
   font-weight: 600;
-}
-
-/* Recommendations */
-.recommendations-section {
-  margin-bottom: 2.5rem;
-}
-
-.recommendations-count {
-  background: #3b82f6;
-  color: white;
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 0.25rem 0.75rem;
-  border-radius: 12px;
-}
-
-.recommendations-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1.25rem;
-}
-
-.recommendation-card {
-  background: white;
-  border-radius: 12px;
-  padding: 1.5rem;
-  border: 1px solid #e2e8f0;
-  display: flex;
-  gap: 1rem;
-  align-items: flex-start;
-}
-
-.recommendation-card.critical {
-  border-left: 4px solid #ef4444;
-  background: linear-gradient(90deg, rgba(239, 68, 68, 0.05) 0%, transparent 100%);
-}
-
-.recommendation-card.warning {
-  border-left: 4px solid #f59e0b;
-  background: linear-gradient(90deg, rgba(245, 158, 11, 0.05) 0%, transparent 100%);
-}
-
-.recommendation-card.success {
-  border-left: 4px solid #10b981;
-  background: linear-gradient(90deg, rgba(16, 185, 129, 0.05) 0%, transparent 100%);
-}
-
-.recommendation-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.recommendation-card.critical .recommendation-icon {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-}
-
-.recommendation-card.warning .recommendation-icon {
-  background: rgba(245, 158, 11, 0.1);
-  color: #f59e0b;
-}
-
-.recommendation-card.success .recommendation-icon {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-}
-
-.recommendation-content {
-  flex: 1;
-}
-
-.recommendation-content h4 {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #1e293b;
-  margin: 0 0 0.5rem 0;
-}
-
-.recommendation-content p {
-  font-size: 0.875rem;
-  color: #64748b;
-  margin: 0;
-  line-height: 1.4;
-}
-
-.recommendation-action {
-  flex-shrink: 0;
 }
 
 /* Buttons */
@@ -1090,6 +1301,10 @@ export default {
     gap: 1.5rem;
   }
 
+  .period-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
   .dashboard-stats {
     grid-template-columns: 1fr;
   }
@@ -1098,12 +1313,12 @@ export default {
     grid-template-columns: 1fr;
   }
 
-  .transactions-grid {
+  .transactions-list {
     grid-template-columns: 1fr;
   }
 
-  .recommendations-grid {
-    grid-template-columns: 1fr;
+  .category-name {
+    max-width: 80px;
   }
 }
 </style>

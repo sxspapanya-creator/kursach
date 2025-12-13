@@ -60,11 +60,13 @@
 
 <script>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
 
 export default {
   name: 'TransactionList',
   setup() {
+    const router = useRouter()
     const transactions = ref([])
     const categories = ref([])
     const loading = ref(true)
@@ -99,6 +101,11 @@ export default {
       } catch (error) {
         console.error('Error fetching categories:', error)
       }
+    }
+
+    // ДОБАВИТЬ ФУНКЦИЮ РЕДАКТИРОВАНИЯ
+    const editTransaction = (transaction) => {
+      router.push(`/transactions/edit/${transaction.id}`)
     }
 
     const deleteTransaction = async (id) => {
@@ -143,6 +150,7 @@ export default {
       loading,
       filters,
       fetchTransactions,
+      editTransaction, // <-- ДОБАВИТЬ В RETURN
       deleteTransaction,
       formatMoney,
       formatDate,

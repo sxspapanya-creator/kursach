@@ -3,69 +3,78 @@
     <!-- Навигация -->
     <nav class="navbar">
       <div class="nav-container">
-        <div class="nav-brand">
-          <router-link to="/" class="brand-link">
-            💰 Финансы
-          </router-link>
+        <!-- Логотип слева -->
+        <div class="nav-left">
+          <div class="nav-brand">
+            <router-link to="/" class="brand-link">
+              💰 Финансы
+            </router-link>
+          </div>
         </div>
 
-        <ul class="nav-menu">
-          <li>
-            <router-link to="/" class="nav-link" exact-active-class="active">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                <polyline points="9 22 9 12 15 12 15 22"/>
-              </svg>
-              <span>Обзор</span>
-            </router-link>
-          </li>
-          <li>
-            <router-link to="/transactions" class="nav-link" active-class="active">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
-                <line x1="1" y1="10" x2="23" y2="10"/>
-              </svg>
-              <span>Транзакции</span>
-            </router-link>
-          </li>
-          <li>
-            <router-link to="/categories" class="nav-link" active-class="active">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
-                <line x1="7" y1="7" x2="7.01" y2="7"/>
-              </svg>
-              <span>Категории</span>
-            </router-link>
-          </li>
-          <li>
-            <router-link to="/analytics" class="nav-link" active-class="active">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
-                <line x1="12" y1="22.08" x2="12" y2="12"/>
-              </svg>
-              <span>Аналитика</span>
-            </router-link>
-          </li>
-        </ul>
+        <!-- Меню по центру -->
+        <div class="nav-center">
+          <ul class="nav-menu">
+            <li>
+              <router-link to="/" class="nav-link" exact-active-class="active">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                  <polyline points="9 22 9 12 15 12 15 22"/>
+                </svg>
+                <span>Обзор</span>
+              </router-link>
+            </li>
+            <li>
+              <router-link to="/transactions" class="nav-link" active-class="active">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+                  <line x1="1" y1="10" x2="23" y2="10"/>
+                </svg>
+                <span>Транзакции</span>
+              </router-link>
+            </li>
+            <li>
+              <router-link to="/categories" class="nav-link" active-class="active">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                  <line x1="7" y1="7" x2="7.01" y2="7"/>
+                </svg>
+                <span>Категории</span>
+              </router-link>
+            </li>
+            <li>
+              <router-link to="/analytics" class="nav-link" active-class="active">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+                  <line x1="12" y1="22.08" x2="12" y2="12"/>
+                </svg>
+                <span>Аналитика</span>
+              </router-link>
+            </li>
+          </ul>
+        </div>
 
-        <div class="nav-user" v-if="user">
-          <div class="user-info">
-            <div class="user-avatar">
-              {{ user.name.charAt(0).toUpperCase() }}
+        <!-- Пользователь справа -->
+        <div class="nav-right" v-if="user">
+          <div class="nav-user">
+            <div class="user-info">
+              <div class="user-avatar">
+                {{ user.name.charAt(0).toUpperCase() }}
+              </div>
+              <div class="user-details">
+                <div class="user-name">{{ user.name }}</div>
+                <div class="user-email">{{ user.email }}</div>
+              </div>
             </div>
-            <div class="user-details">
-              <div class="user-name">{{ user.name }}</div>
-              <div class="user-email">{{ user.email }}</div>
-            </div>
+            <button @click="logout" class="logout-btn" title="Выйти">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+            </button>
           </div>
-          <button @click="logout" class="logout-btn" title="Выйти">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-              <polyline points="16 17 21 12 16 7"/>
-              <line x1="21" y1="12" x2="9" y2="12"/>
-            </svg>
-          </button>
         </div>
       </div>
     </nav>
@@ -249,6 +258,14 @@ body {
   align-items: center;
   justify-content: space-between;
   height: 64px;
+  position: relative;
+}
+
+/* Левая часть (логотип) */
+.nav-left {
+  flex: 0 0 auto;
+  position: absolute;
+  left: 1.5rem;
 }
 
 .nav-brand {
@@ -263,13 +280,24 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  white-space: nowrap;
+}
+
+/* Центральная часть (меню) */
+.nav-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  width: 100%;
 }
 
 .nav-menu {
   display: flex;
   list-style: none;
-  gap: 0.5rem;
-  flex: 1;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  justify-content: center;
 }
 
 .nav-menu li {
@@ -288,6 +316,7 @@ body {
   font-weight: 500;
   transition: all 0.2s;
   border: 2px solid transparent;
+  white-space: nowrap;
 }
 
 .nav-link:hover {
@@ -305,11 +334,17 @@ body {
   flex-shrink: 0;
 }
 
+/* Правая часть (пользователь) */
+.nav-right {
+  flex: 0 0 auto;
+  position: absolute;
+  right: 1.5rem;
+}
+
 .nav-user {
   display: flex;
   align-items: center;
   gap: 1rem;
-  margin-left: 2rem;
 }
 
 .user-info {
@@ -329,6 +364,7 @@ body {
   font-weight: 600;
   font-size: 0.875rem;
   color: white;
+  flex-shrink: 0;
 }
 
 .user-details {
@@ -338,11 +374,13 @@ body {
 .user-name {
   font-weight: 600;
   font-size: 0.875rem;
+  white-space: nowrap;
 }
 
 .user-email {
   font-size: 0.75rem;
   opacity: 0.8;
+  white-space: nowrap;
 }
 
 .logout-btn {
@@ -356,6 +394,7 @@ body {
   align-items: center;
   justify-content: center;
   transition: background-color 0.2s;
+  flex-shrink: 0;
 }
 
 .logout-btn:hover {
@@ -484,8 +523,8 @@ body {
     display: block;
   }
 
-  .nav-menu {
-    gap: 1rem;
+  .nav-link span {
+    display: inline;
   }
 }
 
@@ -494,8 +533,16 @@ body {
     padding: 0 1rem;
   }
 
+  .nav-left {
+    left: 1rem;
+  }
+
+  .nav-right {
+    right: 1rem;
+  }
+
   .nav-menu {
-    gap: 0.25rem;
+    gap: 0.5rem;
   }
 
   .nav-link span {
@@ -510,6 +557,21 @@ body {
     display: none;
   }
 
+  .user-details {
+    display: none;
+  }
+
+  .user-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 0.75rem;
+  }
+
+  .logout-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
   .main-content {
     padding: 1rem;
   }
@@ -519,6 +581,27 @@ body {
     right: 1rem;
     top: 1rem;
     max-width: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .nav-link {
+    padding: 0.4rem;
+  }
+
+  .nav-link svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .brand-link {
+    font-size: 1.25rem;
+  }
+
+  .user-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 0.7rem;
   }
 }
 </style>
