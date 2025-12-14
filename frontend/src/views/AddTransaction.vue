@@ -86,7 +86,7 @@
                   :class="{ 'error': amountError }"
                   @input="validateAmount"
               />
-              <span class="currency-symbol">₽</span>
+              <span class="currency-symbol">Br</span>
             </div>
             <div v-if="amountError" class="error-message">{{ amountError }}</div>
           </div>
@@ -193,25 +193,6 @@
                 </div>
               </div>
             </div>
-
-            <div class="form-group" v-if="form.type === 'expense'">
-              <label class="form-label">Приоритет</label>
-              <div class="priority-select">
-                <div
-                    v-for="priority in priorities"
-                    :key="priority.value"
-                    class="priority-option"
-                    :class="{
-                    selected: form.priority === priority.value,
-                    [priority.value]: true
-                  }"
-                    @click="form.priority = priority.value"
-                >
-                  <div class="priority-dot"></div>
-                  <div class="priority-name">{{ priority.name }}</div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -271,14 +252,6 @@ export default {
       { value: 'card', name: 'Карта', icon: '💳' },
       { value: 'cash', name: 'Наличные', icon: '💵' },
       { value: 'transfer', name: 'Перевод', icon: '🏦' },
-      { value: 'other', name: 'Другое', icon: '📱' }
-    ]
-
-    const priorities = [
-      { value: 'essential', name: 'Обязательный' },
-      { value: 'important', name: 'Важный' },
-      { value: 'normal', name: 'Обычный' },
-      { value: 'optional', name: 'Опциональный' }
     ]
 
     const form = ref({
@@ -312,41 +285,6 @@ export default {
       }
     }
 
-    const checkBudgetLimit = async () => {
-      if (form.value.type !== 'expense' || !form.value.category_id || !form.value.amount) {
-        budgetWarning.value = null
-        return
-      }
-
-      try {
-        const category = categories.value.find(c => c.id === form.value.category_id)
-        if (!category?.budget_limit) {
-          budgetWarning.value = null
-          return
-        }
-
-        const response = await axios.get(`/api/categories/${category.id}/spending`, {
-          params: { month: new Date(form.value.date).getMonth() + 1 }
-        })
-
-        const spent = response.data.total || 0
-        const projected = spent + parseFloat(form.value.amount)
-
-        if (projected > category.budget_limit) {
-          const overspend = projected - category.budget_limit
-          budgetWarning.value = {
-            message: `Превышение бюджета на ${formatMoney(overspend)}`,
-            overspend: formatMoney(overspend),
-            percentage: Math.round((projected / category.budget_limit) * 100)
-          }
-        } else {
-          budgetWarning.value = null
-        }
-      } catch (error) {
-        console.error('Error checking budget:', error)
-      }
-    }
-
     const validateAmount = () => {
       const amount = parseFloat(form.value.amount)
       if (amount < 0.01) {
@@ -359,11 +297,11 @@ export default {
     }
 
     const formatMoney = (amount) => {
-      if (amount === null || amount === undefined) return '0 ₽'
+      if (amount === null || amount === undefined) return '0 Br'
       return new Intl.NumberFormat('ru-RU', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
-      }).format(amount) + ' ₽'
+      }).format(amount) + ' Br'
     }
 
     const submitTransaction = async () => {
@@ -403,7 +341,6 @@ export default {
       fetchCategories()
     })
 
-    watch(() => [form.value.amount, form.value.category_id], checkBudgetLimit)
     watch(() => form.value.type, () => {
       form.value.category_id = ''
     })
@@ -416,7 +353,6 @@ export default {
       categories,
       filteredCategories,
       paymentMethods,
-      priorities,
       budgetWarning,
       isFormValid,
       validateAmount,

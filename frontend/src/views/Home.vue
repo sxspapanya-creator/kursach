@@ -26,12 +26,12 @@
     </div>
 
     <!-- Last 3 Months Stats -->
-    <div class="period-stats-section" v-if="monthlyStats.length > 0">
+    <div class="period-stats-section" v-if="monthlyTrends.length > 0">
       <h2 class="section-title">Статистика за последние 3 месяца</h2>
       <div class="period-stats-grid">
-        <div class="period-stat-card" v-for="(monthStat, index) in monthlyStats" :key="index">
+        <div class="period-stat-card" v-for="(monthStat, index) in last3Months" :key="index">
           <div class="period-stat-header">
-            <h3 class="period-stat-month">{{ formatMonth(monthStat.month) }}</h3>
+            <h3 class="period-stat-month">{{ formatMonth(monthStat.period) }}</h3>
             <div class="period-stat-total" :class="getBalanceClass(monthStat.balance)">
               {{ formatMoney(monthStat.balance) }}
             </div>
@@ -297,9 +297,29 @@ export default {
       monthlyBalance: 0
     })
 
-    const monthlyStats = ref([])
+    const monthlyTrends = ref([]) // Теперь получаем с сервера
     const recentTransactions = ref([])
     const loading = ref(true)
+    const error = ref(null)
+
+    // Получаем последние 3 месяца из трендов
+    const last3Months = computed(() => {
+      if (!monthlyTrends.value || monthlyTrends.value.length === 0) return []
+
+      const lastThree = monthlyTrends.value.slice(-3).map(month => {
+        const total = month.income + month.expenses
+        const incomePercentage = total > 0 ? (month.income / total) * 100 : 0
+        const expensesPercentage = total > 0 ? (month.expenses / total) * 100 : 0
+
+        return {
+          ...month,
+          incomePercentage,
+          expensesPercentage
+        }
+      })
+
+      return lastThree
+    })
 
     // Компьютед свойства
     const totalBalance = computed(() => {
@@ -323,98 +343,72 @@ export default {
     const fetchDashboardData = async () => {
       try {
         loading.value = true
-        console.log('Загрузка данных дашборда...')
+        error.value = null
 
-        // 1. Получаем все транзакции для расчета статистики
-        const [transactionsResponse, recentResponse] = await Promise.all([
-          axios.get('/api/transactions'),
+        console.log('Загрузка данных дашборда с сервера...')
+
+        // Используем готовые эндпоинты с сервера
+        const [summaryResponse, recentResponse, trendsResponse, allTransactionsResponse] = await Promise.all([
+          // 1. Статистика за текущий месяц (уже есть в TransactionController)
+          axios.get('/api/transactions/summary'),
+
+          // 2. Последние транзакции (уже есть в TransactionController)
           axios.get('/api/transactions/recent', {
             params: { limit: 6 }
-          })
+          }),
+
+          // 3. Тренды по месяцам (из AnalyticsController)
+          axios.get('/api/analytics/monthly-trends', {
+            params: { months: 12 }
+          }),
+
+          // 4. Все транзакции для расчета общей статистики
+          axios.get('/api/transactions', { params: { limit: 1000 } })
         ])
 
-        console.log('Ответ транзакций:', transactionsResponse.data)
-        console.log('Ответ последних транзакций:', recentResponse.data)
+        console.log('Статистика за месяц:', summaryResponse.data)
+        console.log('Тренды:', trendsResponse.data)
+        console.log('Все транзакций:', allTransactionsResponse.data.data?.length || 0)
 
-        const allTransactions = transactionsResponse.data.data || transactionsResponse.data || []
-        const recentTransactionsData = recentResponse.data.data || recentResponse.data || []
-
-        // 2. Вручную рассчитываем статистику из всех транзакций
-        let totalIncome = 0
-        let totalExpenses = 0
-        let monthlyIncome = 0
-        let monthlyExpenses = 0
-
-        // Для статистики по месяцам
-        const monthlyData = {}
-        const currentDate = new Date()
-        const currentMonth = currentDate.getMonth() + 1
-        const currentYear = currentDate.getFullYear()
-
-        // Перебираем все транзакции
-        allTransactions.forEach(transaction => {
-          const amount = parseFloat(transaction.amount) || 0
-          const transactionDate = new Date(transaction.date)
-          const transactionMonth = transactionDate.getMonth() + 1
-          const transactionYear = transactionDate.getFullYear()
-
-          const monthKey = `${transactionYear}-${String(transactionMonth).padStart(2, '0')}`
-
-          if (!monthlyData[monthKey]) {
-            monthlyData[monthKey] = {
-              income: 0,
-              expenses: 0,
-              month: monthKey
-            }
-          }
-
-          if (transaction.type === 'income') {
-            totalIncome += amount
-            monthlyData[monthKey].income += amount
-
-            if (transactionMonth === currentMonth && transactionYear === currentYear) {
-              monthlyIncome += amount
-            }
-          } else if (transaction.type === 'expense') {
-            totalExpenses += amount
-            monthlyData[monthKey].expenses += amount
-
-            if (transactionMonth === currentMonth && transactionYear === currentYear) {
-              monthlyExpenses += amount
-            }
-          }
-        })
-
-        // 3. Устанавливаем статистику
-        stats.value = {
-          totalIncome,
-          totalExpenses,
-          monthlyIncome,
-          monthlyExpenses,
-          monthlyBalance: monthlyIncome - monthlyExpenses
+        // Обрабатываем статистику за месяц
+        const monthlyStats = summaryResponse.data.data
+        if (monthlyStats) {
+          stats.value.monthlyIncome = monthlyStats.income || 0
+          stats.value.monthlyExpenses = monthlyStats.expenses || 0
+          stats.value.monthlyBalance = monthlyStats.balance || 0
         }
 
-        console.log('Рассчитанная статистика:', stats.value)
+        // Обрабатываем тренды по месяцам
+        const trendsData = trendsResponse.data.data
+        if (trendsData && trendsData.trends) {
+          monthlyTrends.value = trendsData.trends
+        }
 
-        // 4. Обрабатываем статистику за последние 3 месяца
-        const sortedMonths = Object.keys(monthlyData).sort().reverse().slice(0, 3)
-        monthlyStats.value = sortedMonths.map(monthKey => {
-          const data = monthlyData[monthKey]
-          const total = data.income + data.expenses
-          const incomePercentage = total > 0 ? (data.income / total) * 100 : 0
-          const expensesPercentage = total > 0 ? (data.expenses / total) * 100 : 0
+        // Рассчитываем общую статистику из всех транзакций
+        const allTransactions = allTransactionsResponse.data.data || allTransactionsResponse.data || []
+        let totalIncome = 0
+        let totalExpenses = 0
 
-          return {
-            ...data,
-            balance: data.income - data.expenses,
-            incomePercentage,
-            expensesPercentage
+        allTransactions.forEach(transaction => {
+          const amount = parseFloat(transaction.amount) || 0
+          if (transaction.type === 'income') {
+            totalIncome += amount
+          } else if (transaction.type === 'expense') {
+            totalExpenses += amount
           }
         })
 
-        console.log('Статистика по месяцам:', monthlyStats.value)
+        stats.value.totalIncome = totalIncome
+        stats.value.totalExpenses = totalExpenses
 
-        // 5. Обрабатываем последние транзакции
+        console.log('Общая статистика:', {
+          totalIncome,
+          totalExpenses,
+          totalBalance: totalIncome - totalExpenses
+        })
+
+        // Обрабатываем последние транзакции
+        const recentTransactionsData = recentResponse.data.data || recentResponse.data || []
         recentTransactions.value = recentTransactionsData.map(t => ({
           id: t.id,
           amount: t.amount,
@@ -428,9 +422,9 @@ export default {
           }
         }))
 
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error)
-        console.error('Response:', error.response)
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err)
+        error.value = 'Ошибка загрузки данных. Проверьте подключение к серверу.'
 
         // Fallback данные для разработки
         stats.value = {
@@ -441,32 +435,26 @@ export default {
           monthlyBalance: -700
         }
 
-        // Fallback статистика по месяцам
+        // Fallback тренды
         const currentDate = new Date()
-        monthlyStats.value = [
+        monthlyTrends.value = [
           {
-            month: `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`,
+            period: `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`,
             income: 3500,
             expenses: 4200,
-            balance: -700,
-            incomePercentage: 45.5,
-            expensesPercentage: 54.5
+            balance: -700
           },
           {
-            month: `${currentDate.getFullYear()}-${String(currentDate.getMonth()).padStart(2, '0')}`,
+            period: `${currentDate.getFullYear()}-${String(currentDate.getMonth()).padStart(2, '0')}`,
             income: 4500,
             expenses: 2300,
-            balance: 2200,
-            incomePercentage: 66.2,
-            expensesPercentage: 33.8
+            balance: 2200
           },
           {
-            month: `${currentDate.getFullYear()}-${String(currentDate.getMonth() - 1).padStart(2, '0')}`,
+            period: `${currentDate.getFullYear()}-${String(currentDate.getMonth() - 1).padStart(2, '0')}`,
             income: 3000,
             expenses: 2000,
-            balance: 1000,
-            incomePercentage: 60,
-            expensesPercentage: 40
+            balance: 1000
           }
         ]
 
@@ -570,9 +558,11 @@ export default {
 
     return {
       stats,
-      monthlyStats,
+      monthlyTrends,
+      last3Months,
       recentTransactions,
       loading,
+      error,
       totalBalance,
       balanceClass,
       totalBalanceClass,

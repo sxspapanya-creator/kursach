@@ -76,7 +76,7 @@ class TransactionController extends Controller
                 'category_id' => 'required|exists:categories,id',
                 'description' => 'nullable|string|max:500',
                 'date' => 'required|date',
-                'payment_method' => 'required|in:cash,card,transfer'
+                'payment_method' => 'required|in:cash,card,transfer,other'
             ]);
 
             $transaction = Transaction::create($validated);
@@ -128,7 +128,7 @@ class TransactionController extends Controller
                 'category_id' => 'sometimes|required|exists:categories,id',
                 'description' => 'nullable|string|max:500',
                 'date' => 'sometimes|required|date',
-                'payment_method' => 'sometimes|required|in:cash,card,transfer'
+                'payment_method' => 'sometimes|required|in:cash,card,transfer,other'
             ]);
 
             $transaction->update($validated);

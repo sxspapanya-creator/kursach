@@ -20,6 +20,7 @@ Route::get('/health-check', function () {
 // Категории
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/categories/with-transactions', [CategoryController::class, 'withTransactions']);
+Route::get('/categories/with-stats', [CategoryController::class, 'withStats']);
 Route::post('/categories', [CategoryController::class, 'store']);
 Route::get('/categories/{id}', [CategoryController::class, 'show']);
 Route::put('/categories/{id}', [CategoryController::class, 'update']);

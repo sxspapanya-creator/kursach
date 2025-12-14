@@ -12,7 +12,11 @@ class CategoryController extends Controller
     public function index()
     {
         try {
-            $categories = Category::orderBy('type')->orderBy('name')->get();
+            $categories = Category::withCount(['transactions as transactions_count'])
+                ->withSum(['transactions as transactions_amount'], 'amount')
+                ->orderBy('type')
+                ->orderBy('name')
+                ->get();
 
             return response()->json([
                 'status' => 'success',
@@ -32,11 +36,27 @@ class CategoryController extends Controller
             $validated = $request->validate([
                 'name' => 'required|string|max:255|unique:categories,name',
                 'type' => 'required|in:income,expense',
-                'color' => 'sometimes|string|max:7',
-                'budget_limit' => 'sometimes|numeric|min:0'
+                'color' => 'nullable|string|max:7',
+                'budget_limit' => [
+                    'nullable',
+                    'numeric',
+                    'min:0',
+                    function ($attribute, $value, $fail) use ($request) {
+                        if ($request->type === 'expense' && $value === null) {
+                            $fail('Для категории расходов необходимо указать лимит бюджета.');
+                        }
+                    },
+                ],
             ]);
 
+            if ($validated['type'] === 'income') {
+                $validated['budget_limit'] = null;
+            }
+
             $category = Category::create($validated);
+
+            $category->transactions_count = 0;
+            $category->transactions_amount = 0;
 
             return response()->json([
                 'status' => 'success',
@@ -60,7 +80,9 @@ class CategoryController extends Controller
     public function show($id)
     {
         try {
-            $category = Category::findOrFail($id);
+            $category = Category::withCount(['transactions as transactions_count'])
+                ->withSum(['transactions as transactions_amount'], 'amount')
+                ->findOrFail($id);
 
             return response()->json([
                 'status' => 'success',
@@ -82,11 +104,33 @@ class CategoryController extends Controller
             $validated = $request->validate([
                 'name' => 'sometimes|required|string|max:255|unique:categories,name,' . $id,
                 'type' => 'sometimes|required|in:income,expense',
-                'color' => 'sometimes|string|max:7',
-                'budget_limit' => 'sometimes|numeric|min:0|nullable'
+                'color' => 'nullable|string|max:7',
+                'budget_limit' => [
+                    'nullable',
+                    'numeric',
+                    'min:0',
+                    function ($attribute, $value, $fail) use ($request, $category) {
+                        $type = $request->type ?? $category->type;
+
+                        if ($type === 'expense' && $value === null) {
+                            $fail('Для категории расходов необходимо указать лимит бюджета.');
+                        }
+
+                        if ($type === 'income' && $value !== null) {
+                            $fail('Лимит бюджета нельзя указывать для доходов.');
+                        }
+                    },
+                ],
             ]);
 
+            if (($validated['type'] ?? $category->type) === 'income') {
+                $validated['budget_limit'] = null;
+            }
+
             $category->update($validated);
+
+            $category->loadCount(['transactions as transactions_count']);
+            $category->loadSum(['transactions as transactions_amount'], 'amount');
 
             return response()->json([
                 'status' => 'success',
@@ -112,8 +156,7 @@ class CategoryController extends Controller
         try {
             $category = Category::findOrFail($id);
 
-            // Проверяем, есть ли транзакции в этой категории
-            $transactionCount = Transaction::where('category_id', $id)->count();
+            $transactionCount = $category->transactions()->count();
             if ($transactionCount > 0) {
                 return response()->json([
                     'status' => 'error',
@@ -135,15 +178,48 @@ class CategoryController extends Controller
         }
     }
 
-    // Дополнительный метод для массового получения категорий с транзакциями
     public function withTransactions(Request $request)
     {
         try {
-            $categories = Category::withCount(['transactions as transactions_count'])
-                ->withSum(['transactions as transactions_amount'], 'amount')
+            $month = $request->month ?? now()->month;
+            $year = $request->year ?? now()->year;
+
+            $categories = Category::query()
+                // Общая статистика
+                ->withCount(['transactions as transaction_count'])
+                ->withSum(['transactions as total_amount'], 'amount')
+                // Статистика за текущий месяц
+                ->withCount(['transactions as current_month_count' => function($query) use ($month, $year) {
+                    $query->whereMonth('date', $month)->whereYear('date', $year);
+                }])
+                ->withSum(['transactions as current_month_total' => function($query) use ($month, $year) {
+                    $query->whereMonth('date', $month)->whereYear('date', $year);
+                }], 'amount')
+                // Дата последней транзакции
+                ->with(['transactions' => function($query) {
+                    $query->select('category_id', 'date')
+                        ->orderBy('date', 'desc');
+                }])
                 ->orderBy('type')
                 ->orderBy('name')
-                ->get();
+                ->get()
+                ->map(function ($category) {
+                    $lastTransaction = $category->transactions->first();
+
+                    return [
+                        'id' => $category->id,
+                        'name' => $category->name,
+                        'type' => $category->type,
+                        'color' => $category->color,
+                        'budget_limit' => $category->budget_limit,
+                        'transaction_count' => $category->transaction_count,
+                        'total_amount' => $category->total_amount,
+                        'current_month_count' => $category->current_month_count,
+                        'current_month_total' => $category->current_month_total,
+                        'last_transaction_date' => $lastTransaction->date ?? null,
+                        'updated_at' => $category->updated_at->format('Y-m-d H:i:s')
+                    ];
+                });
 
             return response()->json([
                 'status' => 'success',
@@ -152,8 +228,68 @@ class CategoryController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to fetch categories with transactions'
+                'message' => 'Failed to fetch categories with transactions',
+                'error' => $e->getMessage()
             ], 500);
         }
     }
+
+    public function withStats(Request $request)
+    {
+        try {
+            $month = $request->input('month', now()->month);
+            $year = $request->input('year', now()->year);
+
+            $categories = Category::query()
+                // Общее количество транзакций
+                ->withCount(['transactions as transaction_count'])
+                // Сумма всех транзакций
+                ->withSum(['transactions as total_amount'], 'amount')
+                // Количество транзакций за текущий месяц
+                ->withCount(['transactions as current_month_count' => function($query) use ($month, $year) {
+                    $query->whereMonth('date', $month)
+                        ->whereYear('date', $year);
+                }])
+                // Сумма транзакций за текущий месяц
+                ->withSum(['transactions as current_month_total' => function($query) use ($month, $year) {
+                    $query->whereMonth('date', $month)
+                        ->whereYear('date', $year);
+                }], 'amount')
+                // Дата последней транзакции
+                ->with(['transactions' => function($query) {
+                    $query->orderBy('date', 'desc')->limit(1);
+                }])
+                ->orderBy('type')
+                ->orderBy('name')
+                ->get()
+                ->map(function ($category) {
+                    return [
+                        'id' => $category->id,
+                        'name' => $category->name,
+                        'type' => $category->type,
+                        'color' => $category->color,
+                        'budget_limit' => $category->budget_limit,
+                        'transaction_count' => $category->transaction_count,
+                        'total_amount' => abs($category->total_amount ?? 0),
+                        'current_month_count' => $category->current_month_count,
+                        'current_month_total' => abs($category->current_month_total ?? 0),
+                        'last_transaction_date' => $category->transactions->first()->date ?? null,
+                        'created_at' => $category->created_at,
+                        'updated_at' => $category->updated_at,
+                    ];
+                });
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $categories
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to fetch categories with stats',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 }
