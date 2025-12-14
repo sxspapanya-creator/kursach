@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\AnalyticsController;
@@ -48,3 +49,4 @@ Route::fallback(function () {
         'message' => 'API route not found'
     ], 404);
 });
+

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\SocialLoginController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\TaskController;
@@ -14,6 +15,7 @@ Route::group(['prefix' => '/'], function ($route) {
     });
 });
 
+//OAuth
 Route::get('/auth/google', [SocialLoginController::class, 'redirectToGoogle']);
 Route::get('/auth/google/callback', [SocialLoginController::class, 'handleGoogleCallback']);
 
