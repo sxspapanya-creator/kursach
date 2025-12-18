@@ -339,31 +339,60 @@
           </div>
         </div>
 
-        <!-- Статистика тренда -->
+        <!-- Статистика тренда - ОБНОВЛЕННЫЙ -->
         <div class="trend-summary">
           <div class="trend-direction">
             Направление тренда:
             <strong :class="trendDirectionClass">{{ trendDirectionLabel }}</strong>
           </div>
+
+          <div class="trend-comparison" v-if="actualValues.length >= 2">
+            <div class="comparison-item">
+              <span class="comparison-label">Начало периода:</span>
+              <span class="comparison-value">{{ formatMoney(actualValues[0]) }}</span>
+              <span class="comparison-date">({{ formatMonthShort(lineChartMonths[0]) }})</span>
+            </div>
+            <div class="comparison-item">
+              <span class="comparison-label">Конец периода:</span>
+              <span class="comparison-value">{{ formatMoney(actualValues[actualValues.length - 1]) }}</span>
+              <span class="comparison-date">({{ formatMonthShort(lineChartMonths[lineChartMonths.length - 1]) }})</span>
+            </div>
+            <div class="comparison-change" :class="{
+      positive: trendChange > 0,
+      negative: trendChange < 0
+    }">
+              <span class="change-label">Изменение за весь период:</span>
+              <span class="change-value">
+        {{ trendChange > 0 ? '+' : '' }}{{ formatMoney(trendChange) }}
+        ({{ trendChangePercentage > 0 ? '+' : '' }}{{ trendChangePercentage.toFixed(1) }}%)
+      </span>
+            </div>
+          </div>
+
           <div class="trend-stats">
             <div class="stat-item">
-              <span class="stat-label">Средние расходы:</span>
+              <span class="stat-label">Средние факт. расходы:</span>
               <span class="stat-value">{{ formatMoney(averageExpenses) }}</span>
+              <div class="stat-note">по фактическим данным</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Средние взвешенные:</span>
+              <span class="stat-value">{{ formatMoney(averageWeightedExpenses) }}</span>
+              <div class="stat-note">по сглаженным данным</div>
             </div>
             <div class="stat-item">
               <span class="stat-label">Максимальные расходы:</span>
               <span class="stat-value">{{ formatMoney(maxExpenses) }}</span>
+              <div class="stat-note">
+                {{ formatMonthShort(lineChartMonths[actualValues.indexOf(maxExpenses)]) }}
+              </div>
             </div>
             <div class="stat-item">
               <span class="stat-label">Минимальные расходы:</span>
               <span class="stat-value">{{ formatMoney(minExpenses) }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Изменение за период:</span>
-              <span class="stat-value" :class="{ positive: trendChange > 0, negative: trendChange < 0 }">
-                {{ trendChange > 0 ? '+' : '' }}{{ formatMoney(trendChange) }}
-                ({{ trendChangePercentage > 0 ? '+' : '' }}{{ trendChangePercentage.toFixed(1) }}%)
-              </span>
+              <div class="stat-note">
+                {{ formatMonthShort(lineChartMonths[actualValues.indexOf(minExpenses)]) }}
+              </div>
             </div>
           </div>
         </div>
