@@ -6,6 +6,7 @@ use App\Models\Transaction;
 use App\Models\Category;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class TransactionController extends Controller
@@ -28,7 +29,7 @@ class TransactionController extends Controller
                 'year' => 'nullable|integer|min:2000|max:2100',
                 'date_from' => 'nullable|date',
                 'date_to' => 'nullable|date|after_or_equal:date_from',
-                'limit' => 'nullable|integer|min:1|max:100'
+                'limit' => 'nullable|integer|min:1|max:10000'
             ]);
 
             $query = Transaction::where('user_id', $userId)->with('category');
@@ -84,10 +85,19 @@ class TransactionController extends Controller
                     'limit' => $limit
                 ]
             ]);
-        } catch (\Exception $e) {
+        } catch (ValidationException $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to fetch transactions'
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('TransactionController::index error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to fetch transactions: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -325,7 +335,7 @@ class TransactionController extends Controller
             }
 
             $validated = $request->validate([
-                'limit' => 'nullable|integer|min:1|max:100'
+                'limit' => 'nullable|integer|min:1|max:1000'
             ]);
 
             $limit = $validated['limit'] ?? 10;

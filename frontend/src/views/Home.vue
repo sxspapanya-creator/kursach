@@ -31,7 +31,7 @@
       <div class="period-stats-grid">
         <div class="period-stat-card" v-for="(monthStat, index) in last3Months" :key="index">
           <div class="period-stat-header">
-            <h3 class="period-stat-month">{{ formatMonth(monthStat.period) }}</h3>
+            <h3 class="period-stat-month">{{ formatMonth(monthStat.month || monthStat.period) }}</h3>
             <div class="period-stat-total" :class="getBalanceClass(monthStat.balance)">
               {{ formatMoney(monthStat.balance) }}
             </div>
@@ -51,7 +51,7 @@
                 <div class="period-stat-dot expense"></div>
                 Расходы
               </div>
-              <div class="period-stat-amount">{{ formatMoney(monthStat.expenses) }}</div>
+              <div class="period-stat-amount">{{ formatMoney(monthStat.expenses || monthStat.expense || 0) }}</div>
             </div>
           </div>
 
@@ -306,12 +306,18 @@ export default {
       if (!monthlyTrends.value || monthlyTrends.value.length === 0) return []
 
       const lastThree = monthlyTrends.value.slice(-3).map(month => {
-        const total = month.income + month.expenses
-        const incomePercentage = total > 0 ? (month.income / total) * 100 : 0
-        const expensesPercentage = total > 0 ? (month.expenses / total) * 100 : 0
+        // API возвращает 'expense', но мы используем 'expenses' в шаблоне
+        const expenses = month.expenses || month.expense || 0
+        const income = month.income || 0
+        const total = income + expenses
+        const incomePercentage = total > 0 ? (income / total) * 100 : 0
+        const expensesPercentage = total > 0 ? (expenses / total) * 100 : 0
 
         return {
           ...month,
+          income,
+          expenses, // Нормализуем к expenses
+          balance: month.balance || (income - expenses),
           incomePercentage,
           expensesPercentage
         }
@@ -380,22 +386,7 @@ export default {
           credentials: 'include'
         })
 
-        // Парсим JSON ответы
-        const [summaryData, recentData, trendsData, allTransactionsData] = await Promise.all([
-          summaryResponse.json().catch(() => ({ status: 'error', data: null })),
-          recentResponse.json().catch(() => ({ status: 'error', data: [] })),
-          trendsResponse.json().catch(() => ({ status: 'error', data: [] })),
-          allTransactionsResponse.json().catch(() => ({ status: 'error', data: [] }))
-        ])
-
-        console.log('Ответы от сервера:', {
-          summary: summaryData,
-          recent: recentData,
-          trends: trendsData,
-          allTransactions: allTransactionsData
-        })
-
-        // Проверяем статусы ответов
+        // Проверяем статусы ответов перед парсингом
         if (summaryResponse.status === 401 || recentResponse.status === 401 || 
             trendsResponse.status === 401 || allTransactionsResponse.status === 401) {
           throw new Error('Unauthorized')
@@ -403,33 +394,80 @@ export default {
 
         if (!summaryResponse.ok || !recentResponse.ok || !trendsResponse.ok || !allTransactionsResponse.ok) {
           console.error('Ошибки ответов:', {
-            summary: summaryResponse.status,
-            recent: recentResponse.status,
-            trends: trendsResponse.status,
-            allTransactions: allTransactionsResponse.status
+            summary: { status: summaryResponse.status, ok: summaryResponse.ok },
+            recent: { status: recentResponse.status, ok: recentResponse.ok },
+            trends: { status: trendsResponse.status, ok: trendsResponse.ok },
+            allTransactions: { status: allTransactionsResponse.status, ok: allTransactionsResponse.ok }
           })
         }
 
+        // Парсим JSON ответы
+        const [summaryData, recentData, trendsData, allTransactionsData] = await Promise.all([
+          summaryResponse.json().catch((e) => {
+            console.error('Ошибка парсинга summary:', e)
+            return { status: 'error', data: null }
+          }),
+          recentResponse.json().catch((e) => {
+            console.error('Ошибка парсинга recent:', e)
+            return { status: 'error', data: [] }
+          }),
+          trendsResponse.json().catch((e) => {
+            console.error('Ошибка парсинга trends:', e)
+            return { status: 'error', data: [] }
+          }),
+          allTransactionsResponse.json().catch((e) => {
+            console.error('Ошибка парсинга allTransactions:', e)
+            return { status: 'error', data: [] }
+          })
+        ])
+
+        console.log('Ответы от сервера (RAW):', {
+          summary: summaryData,
+          recent: recentData,
+          trends: trendsData,
+          allTransactions: allTransactionsData
+        })
+
         // Обрабатываем статистику за месяц
-        const monthlyStats = summaryData.data || summaryData
-        if (monthlyStats && summaryData.status === 'success') {
-          stats.value.monthlyIncome = monthlyStats.income || 0
-          stats.value.monthlyExpenses = monthlyStats.expenses || 0
-          stats.value.monthlyBalance = monthlyStats.balance || 0
+        if (summaryData.status === 'success' && summaryData.data) {
+          const monthlyStats = summaryData.data
+          stats.value.monthlyIncome = parseFloat(monthlyStats.income) || 0
+          stats.value.monthlyExpenses = parseFloat(monthlyStats.expenses) || 0
+          stats.value.monthlyBalance = parseFloat(monthlyStats.balance) || 0
+          console.log('Статистика за месяц установлена:', {
+            income: stats.value.monthlyIncome,
+            expenses: stats.value.monthlyExpenses,
+            balance: stats.value.monthlyBalance
+          })
+        } else {
+          console.warn('Не удалось получить статистику за месяц:', summaryData)
         }
 
         // Обрабатываем тренды по месяцам
-        if (trendsData.status === 'success') {
-          const trendsResult = trendsData.data || []
+        if (trendsData.status === 'success' && trendsData.data) {
+          const trendsResult = trendsData.data
           if (Array.isArray(trendsResult)) {
             monthlyTrends.value = trendsResult
+            console.log('Тренды установлены:', trendsResult.length, 'месяцев')
+          } else {
+            console.warn('Тренды не являются массивом:', trendsResult)
           }
+        } else {
+          console.warn('Не удалось получить тренды:', trendsData)
         }
 
         // Рассчитываем общую статистику из всех транзакций
-        const allTransactions = (allTransactionsData.status === 'success' && allTransactionsData.data) 
-          ? allTransactionsData.data 
-          : []
+        let allTransactions = []
+        if (allTransactionsData.status === 'success' && allTransactionsData.data) {
+          allTransactions = Array.isArray(allTransactionsData.data) 
+            ? allTransactionsData.data 
+            : []
+        } else {
+          console.warn('Не удалось получить все транзакции:', allTransactionsData)
+        }
+
+        console.log('Всего транзакций получено:', allTransactions.length)
+
         let totalIncome = 0
         let totalExpenses = 0
 
@@ -445,16 +483,23 @@ export default {
         stats.value.totalIncome = totalIncome
         stats.value.totalExpenses = totalExpenses
 
-        console.log('Общая статистика:', {
+        console.log('Общая статистика рассчитана:', {
           totalIncome,
           totalExpenses,
-          totalBalance: totalIncome - totalExpenses
+          totalBalance: totalIncome - totalExpenses,
+          transactionsCount: allTransactions.length
         })
 
         // Обрабатываем последние транзакции
-        const recentTransactionsData = (recentData.status === 'success' && recentData.data) 
-          ? recentData.data 
-          : []
+        let recentTransactionsData = []
+        if (recentData.status === 'success' && recentData.data) {
+          recentTransactionsData = Array.isArray(recentData.data) 
+            ? recentData.data 
+            : []
+        } else {
+          console.warn('Не удалось получить последние транзакции:', recentData)
+        }
+
         recentTransactions.value = recentTransactionsData.map(t => ({
           id: t.id,
           amount: t.amount,
@@ -467,6 +512,19 @@ export default {
             color: t.category?.color || '#94a3b8'
           }
         }))
+
+        console.log('Последние транзакции обработаны:', recentTransactions.value.length)
+        
+        // Финальная проверка данных
+        console.log('Финальное состояние stats:', {
+          monthlyIncome: stats.value.monthlyIncome,
+          monthlyExpenses: stats.value.monthlyExpenses,
+          monthlyBalance: stats.value.monthlyBalance,
+          totalIncome: stats.value.totalIncome,
+          totalExpenses: stats.value.totalExpenses,
+          monthlyTrendsCount: monthlyTrends.value.length,
+          recentTransactionsCount: recentTransactions.value.length
+        })
 
       } catch (err) {
         console.error('Error fetching dashboard data:', err)
