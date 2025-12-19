@@ -277,24 +277,32 @@ class AnalyticsController extends Controller
         $a = ($sumY - $b * $sumX) / $n;
 
         // Коэффициент детерминации R²
-        $ssr = 0; // Объясненная сумма квадратов
+        // R² = 1 - (SSE/SST), где SSE - сумма квадратов ошибок (residuals)
+        $sse = 0; // Сумма квадратов ошибок
         $sst = 0; // Общая сумма квадратов
         $meanY = $sumY / $n;
 
         $i = 1;
         foreach ($data as $value) {
             $predicted = $a + $b * $i;
-            $ssr += pow($predicted - $meanY, 2);
-            $sst += pow($value - $meanY, 2);
+            $sse += pow($value - $predicted, 2); // Квадрат ошибки (residual)
+            $sst += pow($value - $meanY, 2); // Квадрат отклонения от среднего
             $i++;
         }
 
-        $rSquared = $sst > 0 ? $ssr / $sst : 0;
+        // R² = 1 - (SSE/SST)
+        $rSquared = $sst > 0 ? max(0, 1 - ($sse / $sst)) : 0;
 
-        // Определение тренда
+        // Определение тренда на основе угла наклона относительно среднего значения
+        $meanValue = $sumY / $n;
+        $trendThreshold = abs($meanValue) * 0.05; // 5% от среднего значения
+        
         $trend = 'stable';
-        if ($b > 100) $trend = 'growth';
-        elseif ($b < -100) $trend = 'decline';
+        if ($b > $trendThreshold) {
+            $trend = 'growth';
+        } elseif ($b < -$trendThreshold) {
+            $trend = 'decline';
+        }
 
         return [
             'a' => $a,
@@ -523,13 +531,21 @@ class AnalyticsController extends Controller
             $score = 0;
 
             // Оценка по балансу (макс 50 баллов)
+            // 50 баллов при balance >= 10000, линейно до 0 при balance = 0
             if ($balance > 0) {
-                $score += min(50, ($balance / 10000) * 10);
+                $score += min(50, ($balance / 10000) * 50);
+            } elseif ($balance < 0) {
+                // Штраф за отрицательный баланс (макс -25 баллов)
+                $score += max(-25, ($balance / 10000) * 25);
             }
 
             // Оценка по норме сбережений (макс 50 баллов)
+            // 50 баллов при savingsRate >= 25%, линейно до 0 при savingsRate = 0
             if ($savingsRate > 0) {
-                $score += min(50, $savingsRate * 2);
+                $score += min(50, ($savingsRate / 25) * 50);
+            } elseif ($savingsRate < 0) {
+                // Штраф за отрицательную норму сбережений (макс -25 баллов)
+                $score += max(-25, ($savingsRate / 25) * 25);
             }
 
             $score = min(100, max(0, $score));
@@ -717,10 +733,7 @@ class AnalyticsController extends Controller
             $distribution = [];
 
             foreach ($categories as $category) {
-                $totalExpense = $category->transactions->sum('amount');
-                $monthlyAverage = $totalExpense / max(1, count($category->transactions));
-
-                // Анализ стабильности расходов (дисперсия)
+                // Анализ стабильности расходов (дисперсия) за последние 6 месяцев
                 $monthlyData = [];
                 for ($i = 0; $i < 6; $i++) {
                     $monthStart = Carbon::now()->subMonths($i)->startOfMonth();
@@ -734,8 +747,11 @@ class AnalyticsController extends Controller
                     $monthlyData[] = $monthExpense;
                 }
 
+                // Среднемесячные расходы (среднее по месяцам, а не по транзакциям)
+                $monthlyAverage = array_sum($monthlyData) / max(1, count($monthlyData));
+                
                 // Коэффициент вариации для определения стабильности
-                $mean = array_sum($monthlyData) / max(1, count($monthlyData));
+                $mean = $monthlyAverage; // Используем уже рассчитанное среднее
                 $variance = 0;
                 foreach ($monthlyData as $value) {
                     $variance += pow($value - $mean, 2);
@@ -752,9 +768,9 @@ class AnalyticsController extends Controller
                 $distribution[] = [
                     'category_id' => $category->id,
                     'category_name' => $category->name,
-                    'current_monthly_avg' => $monthlyAverage,
-                    'stability_score' => $stabilityScore,
-                    'recommended_limit' => round($recommendedLimit),
+                    'current_monthly_avg' => round($monthlyAverage, 2),
+                    'stability_score' => round($stabilityScore, 1),
+                    'recommended_limit' => round($recommendedLimit, 2),
                     'coefficient_of_variation' => round($coefficientOfVariation, 1)
                 ];
             }
