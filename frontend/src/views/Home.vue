@@ -282,7 +282,6 @@
 <script>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
 
 export default {
   name: 'Home',
@@ -347,56 +346,90 @@ export default {
 
         console.log('Загрузка данных дашборда...')
 
-        // Добавляем токен авторизации
-        const token = localStorage.getItem('auth_token')
-        if (token) {
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+        // Используем fetch с credentials для работы с сессиями
+        const headers = {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
         }
 
-        // Используем URL без /api/
-        const [summaryResponse, recentResponse, trendsResponse, allTransactionsResponse] = await Promise.all([
-          // 1. Статистика за текущий месяц
-          axios.get('/transactions/summary'),
+        // 1. Статистика за текущий месяц
+        const summaryUrl = '/api/transactions/summary'
+        const summaryResponse = await fetch(summaryUrl, {
+          headers,
+          credentials: 'include'
+        })
 
-          // 2. Последние транзакции
-          axios.get('/transactions/recent', {
-            params: { limit: 6 }
-          }),
+        // 2. Последние транзакции
+        const recentUrl = '/api/transactions/recent?limit=6'
+        const recentResponse = await fetch(recentUrl, {
+          headers,
+          credentials: 'include'
+        })
 
-          // 3. Тренды по месяцам
-          axios.get('/analytics/monthly-trends', {
-            params: { months: 12 }
-          }),
+        // 3. Тренды по месяцам
+        const trendsUrl = '/api/analytics/monthly-trends?months=12'
+        const trendsResponse = await fetch(trendsUrl, {
+          headers,
+          credentials: 'include'
+        })
 
-          // 4. Все транзакции для расчета общей статистики
-          axios.get('/transactions', { params: { limit: 1000 } })
+        // 4. Все транзакции для расчета общей статистики
+        const allTransactionsUrl = '/api/transactions?limit=1000'
+        const allTransactionsResponse = await fetch(allTransactionsUrl, {
+          headers,
+          credentials: 'include'
+        })
+
+        // Парсим JSON ответы
+        const [summaryData, recentData, trendsData, allTransactionsData] = await Promise.all([
+          summaryResponse.json().catch(() => ({ status: 'error', data: null })),
+          recentResponse.json().catch(() => ({ status: 'error', data: [] })),
+          trendsResponse.json().catch(() => ({ status: 'error', data: [] })),
+          allTransactionsResponse.json().catch(() => ({ status: 'error', data: [] }))
         ])
 
         console.log('Ответы от сервера:', {
-          summary: summaryResponse.data,
-          recent: recentResponse.data,
-          trends: trendsResponse.data,
-          allTransactions: allTransactionsResponse.data
+          summary: summaryData,
+          recent: recentData,
+          trends: trendsData,
+          allTransactions: allTransactionsData
         })
 
+        // Проверяем статусы ответов
+        if (summaryResponse.status === 401 || recentResponse.status === 401 || 
+            trendsResponse.status === 401 || allTransactionsResponse.status === 401) {
+          throw new Error('Unauthorized')
+        }
+
+        if (!summaryResponse.ok || !recentResponse.ok || !trendsResponse.ok || !allTransactionsResponse.ok) {
+          console.error('Ошибки ответов:', {
+            summary: summaryResponse.status,
+            recent: recentResponse.status,
+            trends: trendsResponse.status,
+            allTransactions: allTransactionsResponse.status
+          })
+        }
+
         // Обрабатываем статистику за месяц
-        const monthlyStats = summaryResponse.data
-        if (monthlyStats) {
+        const monthlyStats = summaryData.data || summaryData
+        if (monthlyStats && summaryData.status === 'success') {
           stats.value.monthlyIncome = monthlyStats.income || 0
           stats.value.monthlyExpenses = monthlyStats.expenses || 0
           stats.value.monthlyBalance = monthlyStats.balance || 0
         }
 
         // Обрабатываем тренды по месяцам
-        const trendsData = trendsResponse.data
-        if (trendsData && trendsData.trends) {
-          monthlyTrends.value = trendsData.trends
-        } else if (Array.isArray(trendsData)) {
-          monthlyTrends.value = trendsData
+        if (trendsData.status === 'success') {
+          const trendsResult = trendsData.data || []
+          if (Array.isArray(trendsResult)) {
+            monthlyTrends.value = trendsResult
+          }
         }
 
         // Рассчитываем общую статистику из всех транзакций
-        const allTransactions = allTransactionsResponse.data || []
+        const allTransactions = (allTransactionsData.status === 'success' && allTransactionsData.data) 
+          ? allTransactionsData.data 
+          : []
         let totalIncome = 0
         let totalExpenses = 0
 
@@ -419,7 +452,9 @@ export default {
         })
 
         // Обрабатываем последние транзакции
-        const recentTransactionsData = recentResponse.data || []
+        const recentTransactionsData = (recentData.status === 'success' && recentData.data) 
+          ? recentData.data 
+          : []
         recentTransactions.value = recentTransactionsData.map(t => ({
           id: t.id,
           amount: t.amount,
@@ -437,11 +472,11 @@ export default {
         console.error('Error fetching dashboard data:', err)
 
         // Если ошибка 401 - пользователь не авторизован
-        if (err.response && err.response.status === 401) {
+        if (err.message && (err.message.includes('401') || err.message.includes('Unauthorized'))) {
           console.log('Пользователь не авторизован')
           error.value = 'Требуется авторизация'
         } else {
-          error.value = 'Ошибка загрузки данных'
+          error.value = 'Ошибка загрузки данных: ' + (err.message || 'Неизвестная ошибка')
         }
 
         // Очищаем данные при ошибке
