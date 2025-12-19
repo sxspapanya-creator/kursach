@@ -1,7 +1,8 @@
 <template>
   <div id="app">
-    <!-- Навигация -->
-    <nav class="navbar">
+    <!-- Навигация показывается только если пользователь авторизован -->
+    <!-- УБИРАЕМ showNav - если авторизован, всегда показываем навигацию -->
+    <nav v-if="isAuthenticated" class="navbar">
       <div class="nav-container">
         <!-- Логотип слева -->
         <div class="nav-left">
@@ -56,15 +57,15 @@
         </div>
 
         <!-- Пользователь справа -->
-        <div class="nav-right" v-if="user">
+        <div class="nav-right">
           <div class="nav-user">
             <div class="user-info">
               <div class="user-avatar">
-                {{ user.name.charAt(0).toUpperCase() }}
+                {{ userInitials }}
               </div>
               <div class="user-details">
-                <div class="user-name">{{ user.name }}</div>
-                <div class="user-email">{{ user.email }}</div>
+                <div class="user-name">{{ userName }}</div>
+                <div class="user-email">{{ userEmail }}</div>
               </div>
             </div>
             <button @click="logout" class="logout-btn" title="Выйти">
@@ -80,6 +81,7 @@
     </nav>
 
     <!-- Основное содержимое -->
+    <!-- УБИРАЕМ класс no-nav - если нет навигации, значит пользователь не авторизован -->
     <main class="main-content">
       <router-view/>
     </main>
@@ -93,138 +95,137 @@
         </button>
       </div>
     </div>
-
-    <!-- Загрузка -->
-    <div v-if="globalLoading" class="global-loading">
-      <div class="loading-spinner"></div>
-      <div class="loading-text">Загрузка...</div>
-    </div>
   </div>
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
 
 export default {
   name: 'App',
   setup() {
     const router = useRouter()
-    const user = ref(null)
-    const globalLoading = ref(false)
+
     const notification = ref({
       show: false,
       type: 'info',
       message: ''
     })
 
-    // Проверяем авторизацию при загрузке
-    const checkAuth = async () => {
+    // Проверяем авторизацию по наличию данных пользователя в localStorage
+    // ИЛИ по наличию сессии (но это сложнее проверить без запроса)
+    const isAuthenticated = computed(() => {
+      const user = localStorage.getItem('user')
+      return !!user
+    })
+
+    // Данные пользователя
+    const userData = computed(() => {
       try {
-        globalLoading.value = true
-        const token = localStorage.getItem('auth_token')
-
-        if (token) {
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
-          axios.defaults.withCredentials = true
-
-          const response = await axios.get('/api/auth/user')
-          if (response.data.authenticated) {
-            user.value = response.data.user
-            localStorage.setItem('user', JSON.stringify(response.data.user))
-          } else {
-            clearAuth()
-          }
-        }
-      } catch (error) {
-        console.error('Auth check failed:', error)
-        clearAuth()
-      } finally {
-        globalLoading.value = false
+        const userStr = localStorage.getItem('user')
+        return userStr ? JSON.parse(userStr) : null
+      } catch {
+        return null
       }
-    }
+    })
 
-    // Выход
-    const logout = async () => {
-      try {
-        globalLoading.value = true
-        await axios.post('/api/auth/logout')
-        clearAuth()
-        showNotification('success', 'Вы успешно вышли')
-        await router.push('/')
-      } catch (error) {
-        console.error('Logout failed:', error)
-        showNotification('error', 'Ошибка при выходе')
-      } finally {
-        globalLoading.value = false
-      }
-    }
+    const userInitials = computed(() => {
+      if (!userData.value?.name) return '?'
+      return userData.value.name.charAt(0).toUpperCase()
+    })
 
-    // Очистка данных авторизации
-    const clearAuth = () => {
-      user.value = null
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('user')
-      localStorage.removeItem('session_id')
-      delete axios.defaults.headers.common['Authorization']
-    }
+    const userName = computed(() => {
+      return userData.value?.name || 'Пользователь'
+    })
 
-    // Показать уведомление
+    const userEmail = computed(() => {
+      return userData.value?.email || ''
+    })
+
+    // Уведомления
     const showNotification = (type, message) => {
-      notification.value = {
-        show: true,
-        type,
-        message
-      }
-
-      // Автоматическое скрытие
-      setTimeout(() => {
-        hideNotification()
-      }, 5000)
+      notification.value = { show: true, type, message }
+      setTimeout(hideNotification, 5000)
     }
 
-    // Скрыть уведомление
     const hideNotification = () => {
       notification.value.show = false
     }
 
-    // Проверка активного маршрута
-    const isActiveRoute = computed(() => {
-      return (route) => {
-        return router.currentRoute.value.path === route
+    // Выход - ИСПРАВЬТЕ URL!
+    const logout = async () => {
+      try {
+        // Используйте правильный URL без /api/
+        await fetch('/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          credentials: 'include'
+        }).catch(() => {})
+
+        // Очищаем локальные данные
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('user')
+
+        showNotification('success', 'Вы успешно вышли из системы')
+
+        // Редирект на логин
+        router.push('/login')
+      } catch {
+        showNotification('error', 'Ошибка при выходе из системы')
       }
-    })
+    }
 
-    onMounted(() => {
-      checkAuth()
+    // При загрузке проверяем сессию
+    onMounted(async () => {
+      console.log('App mounted, проверка авторизации...')
 
-      // Загружаем пользователя из localStorage если есть
-      const savedUser = localStorage.getItem('user')
-      if (savedUser) {
+      // Если есть данные пользователя в localStorage, но нет токена
+      // можно попробовать проверить сессию
+      if (localStorage.getItem('user') && !localStorage.getItem('auth_token')) {
         try {
-          user.value = JSON.parse(savedUser)
-        } catch (e) {
-          console.error('Failed to parse user data:', e)
+          const response = await fetch('/auth/user', {
+            headers: {
+              'Accept': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'include'
+          })
+
+          if (response.ok) {
+            const data = await response.json()
+            console.log('Проверка сессии в App.vue:', data)
+
+            if (!data.authenticated) {
+              // Сессия истекла, очищаем данные
+              localStorage.removeItem('user')
+            }
+          }
+        } catch (error) {
+          console.warn('Не удалось проверить сессию:', error)
         }
       }
     })
 
     return {
-      user,
-      globalLoading,
+      isAuthenticated,
+      userInitials,
+      userName,
+      userEmail,
       notification,
       logout,
       showNotification,
-      hideNotification,
-      isActiveRoute
+      hideNotification
     }
   }
 }
 </script>
 
 <style>
-/* Глобальные стили */
+/* Стили без изменений */
 * {
   margin: 0;
   padding: 0;
@@ -240,7 +241,6 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Навигация */
 .navbar {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
@@ -261,7 +261,6 @@ body {
   position: relative;
 }
 
-/* Левая часть (логотип) */
 .nav-left {
   flex: 0 0 auto;
   position: absolute;
@@ -283,7 +282,6 @@ body {
   white-space: nowrap;
 }
 
-/* Центральная часть (меню) */
 .nav-center {
   flex: 1;
   display: flex;
@@ -334,7 +332,6 @@ body {
   flex-shrink: 0;
 }
 
-/* Правая часть (пользователь) */
 .nav-right {
   flex: 0 0 auto;
   position: absolute;
@@ -401,18 +398,16 @@ body {
   background: rgba(255, 255, 255, 0.1);
 }
 
-/* Основное содержимое */
 .main-content {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 2rem 1.5rem;
   min-height: calc(100vh - 64px);
 }
 
-/* Уведомления */
 .notification {
   position: fixed;
-  top: 80px;
+  top: 20px;
   right: 20px;
   max-width: 400px;
   width: 100%;
@@ -482,47 +477,10 @@ body {
   opacity: 1;
 }
 
-/* Глобальная загрузка */
-.global-loading {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(255, 255, 255, 0.9);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  z-index: 3000;
-  backdrop-filter: blur(4px);
-}
-
-.loading-spinner {
-  width: 50px;
-  height: 50px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #3b82f6;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-.loading-text {
-  margin-top: 1rem;
-  color: #64748b;
-  font-weight: 500;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* Адаптивность */
 @media (min-width: 768px) {
   .user-details {
     display: block;
   }
-
   .nav-link span {
     display: inline;
   }
@@ -532,50 +490,39 @@ body {
   .nav-container {
     padding: 0 1rem;
   }
-
   .nav-left {
     left: 1rem;
   }
-
   .nav-right {
     right: 1rem;
   }
-
   .nav-menu {
     gap: 0.5rem;
   }
-
   .nav-link span {
     display: none;
   }
-
   .nav-link {
     padding: 0.5rem;
   }
-
   .brand-link span {
     display: none;
   }
-
   .user-details {
     display: none;
   }
-
   .user-avatar {
     width: 32px;
     height: 32px;
     font-size: 0.75rem;
   }
-
   .logout-btn svg {
     width: 16px;
     height: 16px;
   }
-
   .main-content {
-    padding: 1rem;
+    padding: 1.5rem 1rem;
   }
-
   .notification {
     left: 1rem;
     right: 1rem;
@@ -588,16 +535,13 @@ body {
   .nav-link {
     padding: 0.4rem;
   }
-
   .nav-link svg {
     width: 16px;
     height: 16px;
   }
-
   .brand-link {
     font-size: 1.25rem;
   }
-
   .user-avatar {
     width: 28px;
     height: 28px;

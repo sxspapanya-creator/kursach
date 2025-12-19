@@ -297,7 +297,7 @@ export default {
       monthlyBalance: 0
     })
 
-    const monthlyTrends = ref([]) // Теперь получаем с сервера
+    const monthlyTrends = ref([])
     const recentTransactions = ref([])
     const loading = ref(true)
     const error = ref(null)
@@ -345,33 +345,42 @@ export default {
         loading.value = true
         error.value = null
 
-        console.log('Загрузка данных дашборда с сервера...')
+        console.log('Загрузка данных дашборда...')
 
-        // Используем готовые эндпоинты с сервера
+        // Добавляем токен авторизации
+        const token = localStorage.getItem('auth_token')
+        if (token) {
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+        }
+
+        // Используем URL без /api/
         const [summaryResponse, recentResponse, trendsResponse, allTransactionsResponse] = await Promise.all([
-          // 1. Статистика за текущий месяц (уже есть в TransactionController)
-          axios.get('/api/transactions/summary'),
+          // 1. Статистика за текущий месяц
+          axios.get('/transactions/summary'),
 
-          // 2. Последние транзакции (уже есть в TransactionController)
-          axios.get('/api/transactions/recent', {
+          // 2. Последние транзакции
+          axios.get('/transactions/recent', {
             params: { limit: 6 }
           }),
 
-          // 3. Тренды по месяцам (из AnalyticsController)
-          axios.get('/api/analytics/monthly-trends', {
+          // 3. Тренды по месяцам
+          axios.get('/analytics/monthly-trends', {
             params: { months: 12 }
           }),
 
           // 4. Все транзакции для расчета общей статистики
-          axios.get('/api/transactions', { params: { limit: 1000 } })
+          axios.get('/transactions', { params: { limit: 1000 } })
         ])
 
-        console.log('Статистика за месяц:', summaryResponse.data)
-        console.log('Тренды:', trendsResponse.data)
-        console.log('Все транзакций:', allTransactionsResponse.data.data?.length || 0)
+        console.log('Ответы от сервера:', {
+          summary: summaryResponse.data,
+          recent: recentResponse.data,
+          trends: trendsResponse.data,
+          allTransactions: allTransactionsResponse.data
+        })
 
         // Обрабатываем статистику за месяц
-        const monthlyStats = summaryResponse.data.data
+        const monthlyStats = summaryResponse.data
         if (monthlyStats) {
           stats.value.monthlyIncome = monthlyStats.income || 0
           stats.value.monthlyExpenses = monthlyStats.expenses || 0
@@ -379,13 +388,15 @@ export default {
         }
 
         // Обрабатываем тренды по месяцам
-        const trendsData = trendsResponse.data.data
+        const trendsData = trendsResponse.data
         if (trendsData && trendsData.trends) {
           monthlyTrends.value = trendsData.trends
+        } else if (Array.isArray(trendsData)) {
+          monthlyTrends.value = trendsData
         }
 
         // Рассчитываем общую статистику из всех транзакций
-        const allTransactions = allTransactionsResponse.data.data || allTransactionsResponse.data || []
+        const allTransactions = allTransactionsResponse.data || []
         let totalIncome = 0
         let totalExpenses = 0
 
@@ -408,7 +419,7 @@ export default {
         })
 
         // Обрабатываем последние транзакции
-        const recentTransactionsData = recentResponse.data.data || recentResponse.data || []
+        const recentTransactionsData = recentResponse.data || []
         recentTransactions.value = recentTransactionsData.map(t => ({
           id: t.id,
           amount: t.amount,
@@ -424,58 +435,27 @@ export default {
 
       } catch (err) {
         console.error('Error fetching dashboard data:', err)
-        error.value = 'Ошибка загрузки данных. Проверьте подключение к серверу.'
 
-        // Fallback данные для разработки
-        stats.value = {
-          totalIncome: 12550,
-          totalExpenses: 8500,
-          monthlyIncome: 3500,
-          monthlyExpenses: 4200,
-          monthlyBalance: -700
+        // Если ошибка 401 - пользователь не авторизован
+        if (err.response && err.response.status === 401) {
+          console.log('Пользователь не авторизован')
+          error.value = 'Требуется авторизация'
+        } else {
+          error.value = 'Ошибка загрузки данных'
         }
 
-        // Fallback тренды
-        const currentDate = new Date()
-        monthlyTrends.value = [
-          {
-            period: `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`,
-            income: 3500,
-            expenses: 4200,
-            balance: -700
-          },
-          {
-            period: `${currentDate.getFullYear()}-${String(currentDate.getMonth()).padStart(2, '0')}`,
-            income: 4500,
-            expenses: 2300,
-            balance: 2200
-          },
-          {
-            period: `${currentDate.getFullYear()}-${String(currentDate.getMonth() - 1).padStart(2, '0')}`,
-            income: 3000,
-            expenses: 2000,
-            balance: 1000
-          }
-        ]
+        // Очищаем данные при ошибке
+        stats.value = {
+          totalIncome: 0,
+          totalExpenses: 0,
+          monthlyIncome: 0,
+          monthlyExpenses: 0,
+          monthlyBalance: 0
+        }
 
-        recentTransactions.value = [
-          {
-            id: 1,
-            description: 'Тестовый доход',
-            amount: 50,
-            type: 'income',
-            date: new Date().toISOString(),
-            category: { name: 'Доход', color: '#10b981' }
-          },
-          {
-            id: 2,
-            description: 'Тестовый расход',
-            amount: 500,
-            type: 'expense',
-            date: new Date().toISOString(),
-            category: { name: 'Расход', color: '#ef4444' }
-          }
-        ]
+        monthlyTrends.value = []
+        recentTransactions.value = []
+
       } finally {
         loading.value = false
       }
@@ -490,7 +470,6 @@ export default {
     const formatMoney = (amount) => {
       if (amount === null || amount === undefined || isNaN(amount)) return '0 Br'
 
-      // Форматирование в белорусских рублях
       return new Intl.NumberFormat('ru-RU', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
