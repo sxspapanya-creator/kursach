@@ -99,13 +99,14 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 
 export default {
   name: 'App',
   setup() {
     const router = useRouter()
+    const route = useRoute()
 
     const notification = ref({
       show: false,
@@ -113,11 +114,14 @@ export default {
       message: ''
     })
 
-    // Проверяем авторизацию по наличию данных пользователя в localStorage
-    // ИЛИ по наличию сессии (но это сложнее проверить без запроса)
+    // Реактивное состояние авторизации
+    const isAuthenticatedState = ref(false)
+
+    // Проверяем авторизацию через API и localStorage
     const isAuthenticated = computed(() => {
+      // Проверяем и localStorage, и состояние из API
       const user = localStorage.getItem('user')
-      return !!user
+      return isAuthenticatedState.value || !!user
     })
 
     // Данные пользователя
@@ -179,34 +183,53 @@ export default {
       }
     }
 
-    // При загрузке проверяем сессию
+    // Функция для проверки авторизации через API
+    const checkAuthStatus = async () => {
+      try {
+        const response = await fetch('/auth/user', {
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          credentials: 'include'
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log('Проверка авторизации в App.vue:', data)
+          
+          if (data.authenticated && data.user) {
+            // Пользователь авторизован, обновляем состояние и localStorage
+            isAuthenticatedState.value = true
+            localStorage.setItem('user', JSON.stringify(data.user))
+          } else {
+            // Пользователь не авторизован
+            isAuthenticatedState.value = false
+            localStorage.removeItem('user')
+          }
+        } else {
+          // Если ответ не успешен, считаем неавторизованным
+          isAuthenticatedState.value = false
+          localStorage.removeItem('user')
+        }
+      } catch (error) {
+        console.warn('Не удалось проверить авторизацию:', error)
+        // При ошибке проверяем localStorage как fallback
+        isAuthenticatedState.value = !!localStorage.getItem('user')
+      }
+    }
+
+    // При загрузке проверяем авторизацию
     onMounted(async () => {
       console.log('App mounted, проверка авторизации...')
+      await checkAuthStatus()
+    })
 
-      // Если есть данные пользователя в localStorage, но нет токена
-      // можно попробовать проверить сессию
-      if (localStorage.getItem('user') && !localStorage.getItem('auth_token')) {
-        try {
-          const response = await fetch('/auth/user', {
-            headers: {
-              'Accept': 'application/json',
-              'X-Requested-With': 'XMLHttpRequest'
-            },
-            credentials: 'include'
-          })
-
-          if (response.ok) {
-            const data = await response.json()
-            console.log('Проверка сессии в App.vue:', data)
-
-            if (!data.authenticated) {
-              // Сессия истекла, очищаем данные
-              localStorage.removeItem('user')
-            }
-          }
-        } catch (error) {
-          console.warn('Не удалось проверить сессию:', error)
-        }
+    // Проверяем авторизацию при изменении маршрута (особенно после логина)
+    watch(() => route.path, async (newPath) => {
+      // Проверяем авторизацию при переходе на защищенные маршруты
+      if (newPath !== '/login' && newPath !== '/register') {
+        await checkAuthStatus()
       }
     })
 
@@ -218,7 +241,8 @@ export default {
       notification,
       logout,
       showNotification,
-      hideNotification
+      hideNotification,
+      checkAuthStatus
     }
   }
 }
