@@ -157,52 +157,72 @@ export default {
             email: form.email,
             password: form.password
           }),
-          credentials: 'include'
+          credentials: 'include',
+          redirect: 'follow' // Следуем за редиректом
         })
 
         console.log('Статус ответа:', response.status)
 
-        if (!response.ok) {
+        // Бэкенд возвращает редирект, но для AJAX это будет 200 или 302
+        // После редиректа сессия уже установлена в куках
+        // Проверяем авторизацию через /auth/user
+        if (response.status === 200 || response.status === 302 || response.redirected) {
+          console.log('Логин успешен, проверяю авторизацию через /auth/user')
+          
+          // Ждем немного, чтобы сессия точно установилась
+          await new Promise(resolve => setTimeout(resolve, 100))
+          
+          // Проверяем авторизацию через сессию
+          const userResponse = await fetch('/auth/user', {
+            headers: {
+              'Accept': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'include'
+          })
+
+          if (userResponse.ok) {
+            const userData = await userResponse.json()
+            if (userData.authenticated && userData.user) {
+              // Сохраняем данные пользователя
+              localStorage.setItem('user', JSON.stringify(userData.user))
+              console.log('Пользователь сохранен:', userData.user)
+              
+              // Редирект на главную
+              console.log('Логин успешен, выполняю редирект на /')
+              router.push('/')
+              return
+            }
+          }
+          
+          // Если не получилось получить данные пользователя, все равно редиректим
+          // Навигационный гард проверит авторизацию
+          router.push('/')
+        } else {
+          // Обрабатываем ошибку
           const errorData = await response.json().catch(() => ({}))
           throw new Error(errorData.message || 'Ошибка авторизации')
         }
-
-        const data = await response.json()
-        console.log('Данные ответа:', data)
-
-        // Сохраняем данные пользователя если они есть
-        if (data.user) {
-          localStorage.setItem('user', JSON.stringify(data.user))
-          console.log('Пользователь сохранен:', data.user)
-        }
-
-        // Если есть токен - сохраняем его тоже
-        if (data.token) {
-          localStorage.setItem('auth_token', data.token)
-        }
-
-        // Ждем немного
-        await new Promise(resolve => setTimeout(resolve, 50))
-
-        // Редирект на главную
-        console.log('Логин успешен, выполняю редирект на /')
-        router.push('/')
 
       } catch (error) {
         console.error('Ошибка при логине:', error)
         generalError.value = error.message || 'Ошибка при входе в систему'
 
         // Очищаем на всякий случай
-        localStorage.removeItem('auth_token')
         localStorage.removeItem('user')
       } finally {
         loading.value = false
       }
     }
 
-// В onMounted добавьте проверку сессии
+    // Google OAuth
+    const loginWithGoogle = () => {
+      window.location.href = '/auth/google'
+    }
+
+    // Проверка авторизации при загрузке компонента
     onMounted(async () => {
-      // Проверяем, может пользователь уже авторизован через сессию
+      // Проверяем сессию через API (сессия хранится в куках)
       try {
         const response = await fetch('/auth/user', {
           headers: {
@@ -222,19 +242,6 @@ export default {
         }
       } catch (error) {
         console.warn('Не удалось проверить сессию при загрузке Login:', error)
-      }
-    })
-
-    // Google OAuth
-    const loginWithGoogle = () => {
-      window.location.href = '/auth/google'
-    }
-
-    // Если уже авторизован - редирект
-    onMounted(() => {
-      const token = localStorage.getItem('auth_token')
-      if (token) {
-        router.push('/')
       }
     })
 

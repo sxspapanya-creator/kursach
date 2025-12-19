@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 
 class AuthController extends Controller
@@ -23,7 +24,8 @@ class AuthController extends Controller
         }
 
         Auth::login($user, true);
-        $token = $user->createToken($user->google_id . now());
+        $tokenName = ($user->google_id ?? $user->email) . '_' . now()->timestamp;
+        $token = $user->createToken($tokenName);
         $session = request()->session();
         $session->put('token', $token->plainTextToken);
 
@@ -43,10 +45,51 @@ class AuthController extends Controller
         ]);
 
         Auth::login($user, true);
-        $token = $user->createToken($user->google_id . now());
+        $tokenName = ($user->google_id ?? $user->email) . '_' . now()->timestamp;
+        $token = $user->createToken($tokenName);
         $session = request()->session();
         $session->put('token', $token->plainTextToken);
 
         return redirect()->intended();
+    }
+
+    public function user(Request $request)
+    {
+        // Проверяем авторизацию через сессию
+        if (Auth::check()) {
+            $user = Auth::user();
+            return response()->json([
+                'authenticated' => true,
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                ]
+            ]);
+        }
+
+        // Если нет сессии, проверяем токен из сессии
+        $sessionToken = $request->session()->get('token');
+        if ($sessionToken) {
+            $token = PersonalAccessToken::findToken($sessionToken);
+            if ($token && (!$token->expires_at || $token->expires_at->isFuture())) {
+                $user = $token->tokenable;
+                if ($user) {
+                    Auth::login($user);
+                    return response()->json([
+                        'authenticated' => true,
+                        'user' => [
+                            'id' => $user->id,
+                            'name' => $user->name,
+                            'email' => $user->email,
+                        ]
+                    ]);
+                }
+            }
+        }
+
+        return response()->json([
+            'authenticated' => false
+        ], 401);
     }
 }

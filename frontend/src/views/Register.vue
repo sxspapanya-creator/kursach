@@ -83,7 +83,6 @@
 <script>
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
 
 export default {
   name: 'Register',
@@ -156,42 +155,67 @@ export default {
       loading.value = true
 
       try {
-        const response = await axios.post('/api/auth/register', {
-          name: form.name,
-          email: form.email,
-          password: form.password,
-          password_confirmation: form.password_confirmation
+        const response = await fetch('/auth/register', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: JSON.stringify({
+            name: form.name,
+            email: form.email,
+            password: form.password
+          }),
+          credentials: 'include',
+          redirect: 'follow'
         })
 
-        // Получаем токен
-        const token = response.data.token || localStorage.getItem('auth_token')
+        console.log('Статус ответа регистрации:', response.status)
 
-        if (token) {
-          localStorage.setItem('auth_token', token)
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+        // Бэкенд возвращает редирект, сессия уже установлена в куках
+        if (response.status === 200 || response.status === 302 || response.redirected) {
+          console.log('Регистрация успешна, проверяю авторизацию через /auth/user')
+          
+          // Ждем немного, чтобы сессия точно установилась
+          await new Promise(resolve => setTimeout(resolve, 100))
+          
+          // Проверяем авторизацию через сессию
+          const userResponse = await fetch('/auth/user', {
+            headers: {
+              'Accept': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'include'
+          })
 
-          // Получаем информацию о пользователе
-          const userResponse = await axios.get('/api/auth/user')
-          localStorage.setItem('user', JSON.stringify(userResponse.data.user))
-
-          // Перенаправляем на главную
-          await router.push('/')
+          if (userResponse.ok) {
+            const userData = await userResponse.json()
+            if (userData.authenticated && userData.user) {
+              // Сохраняем данные пользователя
+              localStorage.setItem('user', JSON.stringify(userData.user))
+              console.log('Пользователь сохранен:', userData.user)
+              
+              // Редирект на главную
+              router.push('/')
+              return
+            }
+          }
+          
+          // Если не получилось получить данные пользователя, все равно редиректим
+          router.push('/')
+        } else {
+          // Обрабатываем ошибку
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.message || 'Ошибка регистрации')
         }
       } catch (error) {
         console.error('Registration error:', error)
 
-        if (error.response) {
-          if (error.response.status === 400) {
-            if (error.response.data.message?.includes('already exists')) {
-              errors.email = 'Пользователь с таким email уже существует'
-            } else {
-              errors.email = error.response.data.message || 'Ошибка регистрации'
-            }
-          } else {
-            errors.email = 'Ошибка сервера. Попробуйте позже.'
-          }
+        if (error.message?.includes('already exists') || error.message?.includes('User already exists')) {
+          errors.email = 'Пользователь с таким email уже существует'
         } else {
-          errors.email = 'Ошибка сети. Проверьте соединение.'
+          errors.email = error.message || 'Ошибка регистрации'
         }
       } finally {
         loading.value = false
