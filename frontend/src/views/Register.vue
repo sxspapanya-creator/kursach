@@ -207,14 +207,34 @@ export default {
         } else {
           // Обрабатываем ошибку
           const errorData = await response.json().catch(() => ({}))
-          throw new Error(errorData.message || 'Ошибка регистрации')
+          
+          // Если есть ошибки валидации
+          if (errorData.errors) {
+            if (errorData.errors.email) {
+              errors.email = Array.isArray(errorData.errors.email) 
+                ? errorData.errors.email[0] 
+                : errorData.errors.email
+            }
+            if (errorData.errors.name) {
+              errors.name = Array.isArray(errorData.errors.name) 
+                ? errorData.errors.name[0] 
+                : errorData.errors.name
+            }
+            if (errorData.errors.password) {
+              errors.password = Array.isArray(errorData.errors.password) 
+                ? errorData.errors.password[0] 
+                : errorData.errors.password
+            }
+          } else {
+            throw new Error(errorData.message || 'Ошибка регистрации')
+          }
         }
       } catch (error) {
         console.error('Registration error:', error)
 
         if (error.message?.includes('already exists') || error.message?.includes('User already exists')) {
           errors.email = 'Пользователь с таким email уже существует'
-        } else {
+        } else if (!errors.email && !errors.name && !errors.password) {
           errors.email = error.message || 'Ошибка регистрации'
         }
       } finally {

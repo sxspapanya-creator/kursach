@@ -21,40 +21,55 @@ class TransactionController extends Controller
                 ], 401);
             }
 
+            $validated = $request->validate([
+                'type' => 'nullable|in:income,expense',
+                'category_id' => 'nullable|integer|exists:categories,id',
+                'month' => 'nullable|integer|min:1|max:12',
+                'year' => 'nullable|integer|min:2000|max:2100',
+                'date_from' => 'nullable|date',
+                'date_to' => 'nullable|date|after_or_equal:date_from',
+                'limit' => 'nullable|integer|min:1|max:100'
+            ]);
+
             $query = Transaction::where('user_id', $userId)->with('category');
 
             // Фильтрация по типу
-            if ($request->has('type') && in_array($request->type, ['income', 'expense'])) {
-                $query->where('type', $request->type);
+            if (isset($validated['type'])) {
+                $query->where('type', $validated['type']);
             }
 
             // Фильтрация по категории
-            if ($request->has('category_id')) {
-                $query->where('category_id', $request->category_id);
+            if (isset($validated['category_id'])) {
+                // Проверяем, что категория принадлежит пользователю
+                $category = Category::where('user_id', $userId)
+                    ->where('id', $validated['category_id'])
+                    ->first();
+                if ($category) {
+                    $query->where('category_id', $validated['category_id']);
+                }
             }
 
             // Фильтрация по месяцу
-            if ($request->has('month')) {
-                $query->whereMonth('date', $request->month);
+            if (isset($validated['month'])) {
+                $query->whereMonth('date', $validated['month']);
             }
 
             // Фильтрация по году
-            if ($request->has('year')) {
-                $query->whereYear('date', $request->year);
+            if (isset($validated['year'])) {
+                $query->whereYear('date', $validated['year']);
             }
 
             // Фильтрация по дате (диапазон)
-            if ($request->has('date_from')) {
-                $query->where('date', '>=', $request->date_from);
+            if (isset($validated['date_from'])) {
+                $query->where('date', '>=', $validated['date_from']);
             }
 
-            if ($request->has('date_to')) {
-                $query->where('date', '<=', $request->date_to);
+            if (isset($validated['date_to'])) {
+                $query->where('date', '<=', $validated['date_to']);
             }
 
             // Лимит для пагинации
-            $limit = $request->get('limit', 50);
-            if ($limit > 100) $limit = 100; // Максимальный лимит
+            $limit = $validated['limit'] ?? 50;
 
             $transactions = $query->orderBy('date', 'desc')
                 ->orderBy('created_at', 'desc')
@@ -256,8 +271,13 @@ class TransactionController extends Controller
                 ], 401);
             }
 
-            $month = $request->get('month', date('m'));
-            $year = $request->get('year', date('Y'));
+            $validated = $request->validate([
+                'month' => 'nullable|integer|min:1|max:12',
+                'year' => 'nullable|integer|min:2000|max:2100'
+            ]);
+
+            $month = $validated['month'] ?? date('m');
+            $year = $validated['year'] ?? date('Y');
 
             $income = Transaction::where('user_id', $userId)
                 ->where('type', 'income')
@@ -304,7 +324,11 @@ class TransactionController extends Controller
                 ], 401);
             }
 
-            $limit = $request->get('limit', 10);
+            $validated = $request->validate([
+                'limit' => 'nullable|integer|min:1|max:100'
+            ]);
+
+            $limit = $validated['limit'] ?? 10;
 
             $transactions = Transaction::where('user_id', $userId)
                 ->with('category')

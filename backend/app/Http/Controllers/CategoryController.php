@@ -262,8 +262,13 @@ class CategoryController extends Controller
                 ], 401);
             }
 
-            $month = $request->month ?? now()->month;
-            $year = $request->year ?? now()->year;
+            $validated = $request->validate([
+                'month' => 'nullable|integer|min:1|max:12',
+                'year' => 'nullable|integer|min:2000|max:2100'
+            ]);
+
+            $month = $validated['month'] ?? now()->month;
+            $year = $validated['year'] ?? now()->year;
 
             $categories = Category::where('user_id', $userId)
                 // Общая статистика
@@ -326,8 +331,13 @@ class CategoryController extends Controller
                 ], 401);
             }
 
-            $month = $request->input('month', now()->month);
-            $year = $request->input('year', now()->year);
+            $validated = $request->validate([
+                'month' => 'nullable|integer|min:1|max:12',
+                'year' => 'nullable|integer|min:2000|max:2100'
+            ]);
+
+            $month = $validated['month'] ?? now()->month;
+            $year = $validated['year'] ?? now()->year;
 
             $categories = Category::where('user_id', $userId)
                 // Общее количество транзакций

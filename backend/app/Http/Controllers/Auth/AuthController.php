@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 
@@ -15,43 +16,75 @@ class AuthController extends Controller
 {
     public function login(Request $request)
     {
-        $credentials = $request->only('email', 'password');
-        $user = User::where('email', $credentials['email'])->first();
-        if (!$user) {
-            throw new BadRequestHttpException('User does not exist');
-        }
-        if (!Hash::check($credentials['password'], $user->password)) {
-            throw new BadRequestHttpException('Wrong password');
-        }
+        try {
+            $validated = $request->validate([
+                'email' => 'required|email|max:255',
+                'password' => 'required|string|min:6|max:255'
+            ]);
 
-        Auth::login($user, true);
-        $tokenName = ($user->google_id ?? $user->email) . '_' . now()->timestamp;
-        $token = $user->createToken($tokenName);
-        $session = request()->session();
-        $session->put('token', $token->plainTextToken);
+            $user = User::where('email', $validated['email'])->first();
+            if (!$user) {
+                return response()->json([
+                    'message' => 'User does not exist'
+                ], 400);
+            }
+            
+            if (!Hash::check($validated['password'], $user->password)) {
+                return response()->json([
+                    'message' => 'Wrong password'
+                ], 400);
+            }
 
-        return redirect()->intended();
+            Auth::login($user, true);
+            $tokenName = ($user->google_id ?? $user->email) . '_' . now()->timestamp;
+            $token = $user->createToken($tokenName);
+            $session = request()->session();
+            $session->put('token', $token->plainTextToken);
+
+            return redirect()->intended();
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Login failed'
+            ], 500);
+        }
     }
 
     public function register(Request $request) {
-        $data = $request->only('name', 'email', 'password');
-        $user = User::where('email', $data['email'])->first();
-        if ($user) {
-            throw new BadRequestHttpException('User already exists');
+        try {
+            $validated = $request->validate([
+                'name' => 'required|string|min:2|max:255',
+                'email' => 'required|email|max:255|unique:users,email',
+                'password' => 'required|string|min:6|max:255'
+            ]);
+
+            $user = User::create([
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'password' => Hash::make($validated['password']),
+            ]);
+
+            Auth::login($user, true);
+            $tokenName = ($user->google_id ?? $user->email) . '_' . now()->timestamp;
+            $token = $user->createToken($tokenName);
+            $session = request()->session();
+            $session->put('token', $token->plainTextToken);
+
+            return redirect()->intended();
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Registration failed'
+            ], 500);
         }
-        $user = User::create([
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'password' => Hash::make($data['password']),
-        ]);
-
-        Auth::login($user, true);
-        $tokenName = ($user->google_id ?? $user->email) . '_' . now()->timestamp;
-        $token = $user->createToken($tokenName);
-        $session = request()->session();
-        $session->put('token', $token->plainTextToken);
-
-        return redirect()->intended();
     }
 
     public function user(Request $request)

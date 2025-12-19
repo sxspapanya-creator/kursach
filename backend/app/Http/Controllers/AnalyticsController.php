@@ -30,19 +30,25 @@ class AnalyticsController extends Controller
         try {
             $userId = $this->getUserId();
             
+            $validated = $request->validate([
+                'period' => 'nullable|in:week,month,year',
+                'year' => 'nullable|integer|min:2000|max:2100',
+                'month' => 'nullable|integer|min:1|max:12'
+            ]);
+            
             // Параметры периода
-            $period = $request->input('period', 'month');
-            $year = $request->input('year', date('Y'));
-            $month = $request->input('month', date('m'));
+            $period = $validated['period'] ?? 'month';
+            $year = $validated['year'] ?? date('Y');
+            $month = $validated['month'] ?? date('m');
 
             // Базовые данные
             $baseData = $this->getBaseAnalytics($year, $month, $period, $userId);
 
             // Прогнозы с линейной регрессией
-            $forecasts = $this->calculateForecasts();
+            $forecasts = $this->calculateForecasts($userId);
 
             // Тренды с взвешенным скользящим средним
-            $trends = $this->calculateTrends();
+            $trends = $this->calculateTrends($userId);
 
             // Финансовое здоровье
             $financialHealth = $this->calculateFinancialHealth(
@@ -58,7 +64,7 @@ class AnalyticsController extends Controller
             );
 
             // Крупнейшие транзакции
-            $largestTransactions = $this->getLargestTransactions($year, $month);
+            $largestTransactions = $this->getLargestTransactions($year, $month, $userId);
 
             // Расходы по категориям с анализом
             $categorySpending = $this->getCategorySpendingWithAnalysis($year, $month);
@@ -302,15 +308,20 @@ class AnalyticsController extends Controller
     /**
      * Прогнозы доходов и расходов
      */
-    private function calculateForecasts()
+    private function calculateForecasts($userId = null)
     {
         try {
+            if (!$userId) {
+                $userId = $this->getUserId();
+            }
+            
             // Получаем исторические данные за последние 12 месяцев
             $endDate = Carbon::now()->endOfMonth();
             $startDate = $endDate->copy()->subMonths(12)->startOfMonth();
 
             // Доходы по месяцам
-            $monthlyIncome = Transaction::whereBetween('date', [$startDate, $endDate])
+            $monthlyIncome = Transaction::where('user_id', $userId)
+                ->whereBetween('date', [$startDate, $endDate])
                 ->where('type', 'income')
                 ->selectRaw('YEAR(date) as year, MONTH(date) as month, SUM(amount) as total')
                 ->groupBy(DB::raw('YEAR(date), MONTH(date)'))
@@ -326,7 +337,8 @@ class AnalyticsController extends Controller
             }
 
             // Расходы по месяцам
-            $monthlyExpense = Transaction::whereBetween('date', [$startDate, $endDate])
+            $monthlyExpense = Transaction::where('user_id', $userId)
+                ->whereBetween('date', [$startDate, $endDate])
                 ->where('type', 'expense')
                 ->selectRaw('YEAR(date) as year, MONTH(date) as month, SUM(amount) as total')
                 ->groupBy(DB::raw('YEAR(date), MONTH(date)'))
@@ -348,7 +360,7 @@ class AnalyticsController extends Controller
             $expenseRegression = $this->linearRegression($monthlyExpense);
 
             // Оптимальное распределение для категорий расходов
-            $optimalDistribution = $this->calculateOptimalDistribution();
+            $optimalDistribution = $this->calculateOptimalDistribution($userId);
 
             return [
                 'income_regression' => $incomeRegression,
@@ -411,15 +423,20 @@ class AnalyticsController extends Controller
     /**
      * Расчет трендов
      */
-    private function calculateTrends()
+    private function calculateTrends($userId = null)
     {
         try {
+            if (!$userId) {
+                $userId = $this->getUserId();
+            }
+            
             // Получаем данные за последние 12 месяцев
             $endDate = Carbon::now()->endOfMonth();
             $startDate = $endDate->copy()->subMonths(12)->startOfMonth();
 
             // Фактические расходы по месяцам
-            $monthlyData = Transaction::whereBetween('date', [$startDate, $endDate])
+            $monthlyData = Transaction::where('user_id', $userId)
+                ->whereBetween('date', [$startDate, $endDate])
                 ->where('type', 'expense')
                 ->selectRaw('YEAR(date) as year, MONTH(date) as month, SUM(amount) as total')
                 ->groupBy(DB::raw('YEAR(date), MONTH(date)'))
@@ -647,15 +664,23 @@ class AnalyticsController extends Controller
     /**
      * Поиск оптимального распределения для категорий расходов
      */
-    private function calculateOptimalDistribution()
+    private function calculateOptimalDistribution($userId = null)
     {
         try {
+            if (!$userId) {
+                $userId = $this->getUserId();
+            }
+            
             // Получаем категории расходов (type = 'expense')
-            $categories = Category::whereHas('transactions', function($query) {
-                $query->where('type', 'expense');
-            })
-                ->with(['transactions' => function($query) {
-                    $query->where('type', 'expense')
+            $categories = Category::where('user_id', $userId)
+                ->where('type', 'expense')
+                ->whereHas('transactions', function($query) use ($userId) {
+                    $query->where('user_id', $userId)
+                        ->where('type', 'expense');
+                })
+                ->with(['transactions' => function($query) use ($userId) {
+                    $query->where('user_id', $userId)
+                        ->where('type', 'expense')
                         ->where('date', '>=', Carbon::now()->subMonths(6));
                 }])
                 ->get();
@@ -720,13 +745,18 @@ class AnalyticsController extends Controller
     /**
      * Крупнейшие транзакции
      */
-    private function getLargestTransactions($year, $month)
+    private function getLargestTransactions($year, $month, $userId = null)
     {
         try {
+            if (!$userId) {
+                $userId = $this->getUserId();
+            }
+            
             $startDate = Carbon::create($year, $month, 1)->startOfMonth();
             $endDate = $startDate->copy()->endOfMonth();
 
-            $largestExpenses = Transaction::with('category')
+            $largestExpenses = Transaction::where('user_id', $userId)
+                ->with('category')
                 ->whereBetween('date', [$startDate, $endDate])
                 ->where('type', 'expense')
                 ->orderBy('amount', 'desc')
@@ -743,7 +773,8 @@ class AnalyticsController extends Controller
                     ];
                 });
 
-            $largestIncomes = Transaction::with('category')
+            $largestIncomes = Transaction::where('user_id', $userId)
+                ->with('category')
                 ->whereBetween('date', [$startDate, $endDate])
                 ->where('type', 'income')
                 ->orderBy('amount', 'desc')
@@ -776,23 +807,31 @@ class AnalyticsController extends Controller
     /**
      * Расходы по категориям с анализом
      */
-    private function getCategorySpendingWithAnalysis($year, $month)
+    private function getCategorySpendingWithAnalysis($year, $month, $userId = null)
     {
         try {
+            if (!$userId) {
+                $userId = $this->getUserId();
+            }
+            
             $startDate = Carbon::create($year, $month, 1)->startOfMonth();
             $endDate = $startDate->copy()->endOfMonth();
 
-            $categories = Category::with(['transactions' => function($query) use ($startDate, $endDate) {
-                $query->where('type', 'expense')
-                    ->whereBetween('date', [$startDate, $endDate]);
-            }])
+            $categories = Category::where('user_id', $userId)
+                ->where('type', 'expense')
+                ->with(['transactions' => function($query) use ($startDate, $endDate, $userId) {
+                    $query->where('user_id', $userId)
+                        ->where('type', 'expense')
+                        ->whereBetween('date', [$startDate, $endDate]);
+                }])
                 ->get()
-                ->map(function($category) use ($startDate) {
+                ->map(function($category) use ($startDate, $userId) {
                     $currentMonthTotal = $category->transactions->sum('amount');
 
                     // Среднемесячные расходы за последние 6 месяцев
                     $sixMonthsAgo = $startDate->copy()->subMonths(6);
-                    $averageMonthly = Transaction::where('category_id', $category->id)
+                    $averageMonthly = Transaction::where('user_id', $userId)
+                        ->where('category_id', $category->id)
                         ->where('type', 'expense')
                         ->where('date', '>=', $sixMonthsAgo)
                         ->where('date', '<=', $startDate)
@@ -843,10 +882,17 @@ class AnalyticsController extends Controller
     public function categorySpending(Request $request)
     {
         try {
-            $year = $request->input('year', date('Y'));
-            $month = $request->input('month', date('m'));
+            $userId = $this->getUserId();
+            
+            $validated = $request->validate([
+                'year' => 'nullable|integer|min:2000|max:2100',
+                'month' => 'nullable|integer|min:1|max:12'
+            ]);
+            
+            $year = $validated['year'] ?? date('Y');
+            $month = $validated['month'] ?? date('m');
 
-            $categorySpending = $this->getCategorySpendingWithAnalysis($year, $month);
+            $categorySpending = $this->getCategorySpendingWithAnalysis($year, $month, $userId);
 
             return response()->json([
                 'status' => 'success',
@@ -868,12 +914,19 @@ class AnalyticsController extends Controller
     public function monthlyTrends(Request $request)
     {
         try {
-            $months = $request->input('months', 12);
+            $userId = $this->getUserId();
+            
+            $validated = $request->validate([
+                'months' => 'nullable|integer|min:1|max:60'
+            ]);
+            
+            $months = $validated['months'] ?? 12;
 
             $endDate = Carbon::now()->endOfMonth();
             $startDate = $endDate->copy()->subMonths($months)->startOfMonth();
 
-            $trends = Transaction::whereBetween('date', [$startDate, $endDate])
+            $trends = Transaction::where('user_id', $userId)
+                ->whereBetween('date', [$startDate, $endDate])
                 ->selectRaw('YEAR(date) as year, MONTH(date) as month')
                 ->selectRaw('SUM(CASE WHEN type = "income" THEN amount ELSE 0 END) as income')
                 ->selectRaw('SUM(CASE WHEN type = "expense" THEN amount ELSE 0 END) as expense')
@@ -910,9 +963,16 @@ class AnalyticsController extends Controller
     public function categoryComparison(Request $request)
     {
         try {
-            $year = $request->input('year', date('Y'));
+            $userId = $this->getUserId();
+            
+            $validated = $request->validate([
+                'year' => 'nullable|integer|min:2000|max:2100'
+            ]);
+            
+            $year = $validated['year'] ?? date('Y');
 
-            $comparison = Category::with(['transactions' => function($query) use ($year) {
+            $comparison = Category::where('user_id', $userId)
+                ->with(['transactions' => function($query) use ($year) {
                 $query->where('type', 'expense')
                     ->whereYear('date', $year);
             }])
@@ -965,10 +1025,18 @@ class AnalyticsController extends Controller
     public function budgetProgress(Request $request)
     {
         try {
-            $year = $request->input('year', date('Y'));
-            $month = $request->input('month', date('m'));
+            $userId = $this->getUserId();
+            
+            $validated = $request->validate([
+                'year' => 'nullable|integer|min:2000|max:2100',
+                'month' => 'nullable|integer|min:1|max:12'
+            ]);
+            
+            $year = $validated['year'] ?? date('Y');
+            $month = $validated['month'] ?? date('m');
 
-            $progress = Category::where('budget_limit', '>', 0)
+            $progress = Category::where('user_id', $userId)
+                ->where('budget_limit', '>', 0)
                 ->with(['transactions' => function($query) use ($year, $month) {
                     $query->where('type', 'expense')
                         ->whereYear('date', $year)
@@ -1024,10 +1092,17 @@ class AnalyticsController extends Controller
     public function financialHealth(Request $request)
     {
         try {
-            $year = $request->input('year', date('Y'));
-            $month = $request->input('month', date('m'));
+            $userId = $this->getUserId();
+            
+            $validated = $request->validate([
+                'year' => 'nullable|integer|min:2000|max:2100',
+                'month' => 'nullable|integer|min:1|max:12'
+            ]);
+            
+            $year = $validated['year'] ?? date('Y');
+            $month = $validated['month'] ?? date('m');
 
-            $baseData = $this->getBaseAnalytics($year, $month);
+            $baseData = $this->getBaseAnalytics($year, $month, 'month', $userId);
             $financialHealth = $this->calculateFinancialHealth(
                 $baseData['totals']['balance'] ?? 0,
                 $baseData['totals']['savings_rate'] ?? 0
