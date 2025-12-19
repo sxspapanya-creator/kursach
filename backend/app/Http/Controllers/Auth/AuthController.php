@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 
@@ -91,5 +92,41 @@ class AuthController extends Controller
         return response()->json([
             'authenticated' => false
         ], 401);
+    }
+
+    public function logout(Request $request)
+    {
+        // Получаем токен из сессии
+        $sessionToken = $request->session()->get('token');
+        
+        // Удаляем токен из базы данных, если он существует
+        if ($sessionToken) {
+            $token = PersonalAccessToken::findToken($sessionToken);
+            if ($token) {
+                $token->delete();
+            }
+        }
+
+        // Получаем ID сессии из кук
+        $sessionId = $request->session()->getId();
+
+        // Удаляем сессию из базы данных
+        if ($sessionId) {
+            DB::table('sessions')
+                ->where('id', $sessionId)
+                ->delete();
+        }
+
+        // Очищаем данные из сессии
+        $request->session()->forget('token');
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        // Выходим из системы
+        Auth::logout();
+
+        return response()->json([
+            'message' => 'Successfully logged out'
+        ]);
     }
 }

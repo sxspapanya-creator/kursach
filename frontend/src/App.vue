@@ -157,29 +157,47 @@ export default {
       notification.value.show = false
     }
 
-    // Выход - ИСПРАВЬТЕ URL!
+    // Выход
     const logout = async () => {
       try {
-        // Используйте правильный URL без /api/
-        await fetch('/auth/logout', {
+        // Вызываем endpoint для логаута
+        const response = await fetch('/auth/logout', {
           method: 'POST',
           headers: {
             'Accept': 'application/json',
             'X-Requested-With': 'XMLHttpRequest'
           },
           credentials: 'include'
-        }).catch(() => {})
+        })
 
-        // Очищаем локальные данные
+        // Очищаем локальные данные независимо от ответа
         localStorage.removeItem('auth_token')
         localStorage.removeItem('user')
+        
+        // Обновляем состояние авторизации
+        isAuthenticatedState.value = false
 
-        showNotification('success', 'Вы успешно вышли из системы')
+        if (response.ok) {
+          showNotification('success', 'Вы успешно вышли из системы')
+        } else {
+          // Даже если запрос не удался, все равно выходим
+          showNotification('success', 'Вы вышли из системы')
+        }
 
         // Редирект на логин
         router.push('/login')
-      } catch {
-        showNotification('error', 'Ошибка при выходе из системы')
+      } catch (error) {
+        console.error('Ошибка при выходе:', error)
+        
+        // Очищаем данные даже при ошибке
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('user')
+        isAuthenticatedState.value = false
+        
+        showNotification('success', 'Вы вышли из системы')
+        
+        // Редирект на логин
+        router.push('/login')
       }
     }
 
