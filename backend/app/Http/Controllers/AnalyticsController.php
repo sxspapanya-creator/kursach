@@ -331,9 +331,18 @@ class AnalyticsController extends Controller
                 ->pluck('total')
                 ->toArray();
 
-            // Если данных недостаточно, создаем тестовые данные
+            // Если данных недостаточно, возвращаем нулевые значения
             if (count($monthlyIncome) < 2) {
-                $monthlyIncome = array_fill(0, 12, rand(50000, 100000));
+                $incomeRegression = [
+                    'a' => 0,
+                    'b' => 0,
+                    'r_squared' => 0,
+                    'trend' => 'stable',
+                    'next_month' => 0
+                ];
+            } else {
+                // Линейная регрессия для доходов
+                $incomeRegression = $this->linearRegression($monthlyIncome);
             }
 
             // Расходы по месяцам
@@ -348,16 +357,19 @@ class AnalyticsController extends Controller
                 ->pluck('total')
                 ->toArray();
 
-            // Если данных недостаточно, создаем тестовые данные
+            // Если данных недостаточно, возвращаем нулевые значения
             if (count($monthlyExpense) < 2) {
-                $monthlyExpense = array_fill(0, 12, rand(30000, 80000));
+                $expenseRegression = [
+                    'a' => 0,
+                    'b' => 0,
+                    'r_squared' => 0,
+                    'trend' => 'stable',
+                    'next_month' => 0
+                ];
+            } else {
+                // Линейная регрессия для расходов
+                $expenseRegression = $this->linearRegression($monthlyExpense);
             }
-
-            // Линейная регрессия для доходов
-            $incomeRegression = $this->linearRegression($monthlyIncome);
-
-            // Линейная регрессия для расходов
-            $expenseRegression = $this->linearRegression($monthlyExpense);
 
             // Оптимальное распределение для категорий расходов
             $optimalDistribution = $this->calculateOptimalDistribution($userId);
@@ -445,20 +457,18 @@ class AnalyticsController extends Controller
                 ->get();
 
             if ($monthlyData->isEmpty()) {
-                // Создаем тестовые данные если нет реальных
-                $actualData = [];
-                $months = [];
-                for ($i = 11; $i >= 0; $i--) {
-                    $date = Carbon::now()->subMonths($i);
-                    $actualData[] = rand(30000, 80000);
-                    $months[] = $date->format('Y-m');
-                }
-            } else {
-                $actualData = $monthlyData->pluck('total')->toArray();
-                $months = $monthlyData->map(function($item) {
-                    return $item->year . '-' . str_pad($item->month, 2, '0', STR_PAD_LEFT);
-                })->toArray();
+                // Если нет данных, возвращаем пустые массивы
+                return [
+                    'weighted_moving_average' => [],
+                    'trend_direction' => 'stable',
+                    'actual_data' => []
+                ];
             }
+
+            $actualData = $monthlyData->pluck('total')->toArray();
+            $months = $monthlyData->map(function($item) {
+                return $item->year . '-' . str_pad($item->month, 2, '0', STR_PAD_LEFT);
+            })->toArray();
 
             // Взвешенное скользящее среднее
             $weightedAverage = $this->weightedMovingAverage($actualData, 3);
@@ -580,30 +590,38 @@ class AnalyticsController extends Controller
             // Прогноз на следующий месяц
             $forecastedIncome = $forecasts['next_month_income'] ?? 0;
             $forecastedExpense = $forecasts['next_month_expense'] ?? 0;
+            
+            // Проверяем, есть ли достаточно данных для прогноза
+            $hasForecastData = ($forecastedIncome > 0 || $forecastedExpense > 0) && 
+                               ($forecasts['income_regression']['r_squared'] > 0 || $forecasts['expense_regression']['r_squared'] > 0);
 
-            // Прогноз кассового разрыва
-            $cashGapForecast = $currentBalance + $forecastedIncome - $forecastedExpense;
+            // Прогноз кассового разрыва (только если есть данные для прогноза)
+            if ($hasForecastData) {
+                $cashGapForecast = $currentBalance + $forecastedIncome - $forecastedExpense;
 
-            // Анализ кассового разрыва
-            if ($cashGapForecast < 0) {
-                $recommendations[] = [
-                    'type' => 'critical',
-                    'title' => '⚠️ Прогнозируется кассовый разрыв',
-                    'message' => 'По прогнозам, в следующем месяце будет отрицательный баланс на ' .
-                        number_format(abs($cashGapForecast), 0, ',', ' ') . ' Br. Рекомендуем сократить расходы.'
-                ];
-            } elseif ($cashGapForecast < $currentExpenses * 0.3) {
-                $recommendations[] = [
-                    'type' => 'warning',
-                    'title' => '🔔 Маленький запас прочности',
-                    'message' => 'Прогнозируемый остаток составляет менее 30% от текущих расходов. ' .
-                        'Рекомендуем увеличить сбережения.'
-                ];
+                // Анализ кассового разрыва
+                if ($cashGapForecast < 0) {
+                    $recommendations[] = [
+                        'type' => 'critical',
+                        'title' => '⚠️ Прогнозируется кассовый разрыв',
+                        'message' => 'По прогнозам, в следующем месяце будет отрицательный баланс на ' .
+                            number_format(abs($cashGapForecast), 0, ',', ' ') . ' Br. Рекомендуем сократить расходы.'
+                    ];
+                } elseif ($cashGapForecast < $currentExpenses * 0.3 && $currentExpenses > 0) {
+                    $recommendations[] = [
+                        'type' => 'warning',
+                        'title' => '🔔 Маленький запас прочности',
+                        'message' => 'Прогнозируемый остаток составляет менее 30% от текущих расходов. ' .
+                            'Рекомендуем увеличить сбережения.'
+                    ];
+                }
             }
 
-            // Анализ тренда расходов
+            // Анализ тренда расходов (только если есть данные)
             $trend = $trends['trend_direction'] ?? 'stable';
-            if ($trend === 'growth') {
+            $hasTrendData = !empty($trends['actual_data']);
+            
+            if ($hasTrendData && $trend === 'growth') {
                 $recommendations[] = [
                     'type' => 'warning',
                     'title' => '📈 Рост расходов',
@@ -612,26 +630,28 @@ class AnalyticsController extends Controller
                 ];
             }
 
-            // Анализ нормы сбережений
-            $savingsRate = $totals['savings_rate'] ?? 0;
-            if ($savingsRate < 10) {
-                $recommendations[] = [
-                    'type' => 'warning',
-                    'title' => '💰 Низкая норма сбережений',
-                    'message' => 'Ваша норма сбережений составляет ' . round($savingsRate, 1) .
-                        '%. Рекомендуемый минимум - 10-15%.'
-                ];
-            } elseif ($savingsRate > 30) {
-                $recommendations[] = [
-                    'type' => 'success',
-                    'title' => '✅ Отличная норма сбережений',
-                    'message' => 'Ваша норма сбережений ' . round($savingsRate, 1) .
-                        '% выше рекомендуемой. Отличная работа!'
-                ];
+            // Анализ нормы сбережений (только если есть данные)
+            if ($currentIncome > 0) {
+                $savingsRate = $totals['savings_rate'] ?? 0;
+                if ($savingsRate < 10 && $savingsRate > 0) {
+                    $recommendations[] = [
+                        'type' => 'warning',
+                        'title' => '💰 Низкая норма сбережений',
+                        'message' => 'Ваша норма сбережений составляет ' . round($savingsRate, 1) .
+                            '%. Рекомендуемый минимум - 10-15%.'
+                    ];
+                } elseif ($savingsRate > 30) {
+                    $recommendations[] = [
+                        'type' => 'success',
+                        'title' => '✅ Отличная норма сбережений',
+                        'message' => 'Ваша норма сбережений ' . round($savingsRate, 1) .
+                            '% выше рекомендуемой. Отличная работа!'
+                    ];
+                }
             }
 
-            // Анализ крупных расходов
-            if ($currentExpenses > $currentIncome * 0.9 && $currentIncome > 0) {
+            // Анализ крупных расходов (только если есть данные)
+            if ($currentExpenses > 0 && $currentIncome > 0 && $currentExpenses > $currentIncome * 0.9) {
                 $recommendations[] = [
                     'type' => 'critical',
                     'title' => '💸 Высокий уровень расходов',
@@ -640,12 +660,21 @@ class AnalyticsController extends Controller
                 ];
             }
 
-            // Положительные рекомендации при хороших показателях
-            if (empty($recommendations) || count(array_filter($recommendations, fn($r) => $r['type'] === 'success')) > 0) {
+            // Положительные рекомендации при хороших показателях (только если есть данные)
+            if ($currentIncome > 0 || $currentExpenses > 0) {
+                if (empty($recommendations) || count(array_filter($recommendations, fn($r) => $r['type'] === 'success')) > 0) {
+                    $recommendations[] = [
+                        'type' => 'success',
+                        'title' => '🎯 Бюджет под контролем',
+                        'message' => 'Ваши финансовые показатели выглядят стабильно. Продолжайте следить за бюджетом!'
+                    ];
+                }
+            } else {
+                // Если нет данных вообще, показываем информационное сообщение
                 $recommendations[] = [
-                    'type' => 'success',
-                    'title' => '🎯 Бюджет под контролем',
-                    'message' => 'Ваши финансовые показатели выглядят стабильно. Продолжайте следить за бюджетом!'
+                    'type' => 'info',
+                    'title' => '📊 Добавьте данные',
+                    'message' => 'Для получения аналитики и рекомендаций добавьте транзакции и категории.'
                 ];
             }
 
