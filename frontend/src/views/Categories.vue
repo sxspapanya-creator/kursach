@@ -675,6 +675,8 @@ export default {
   max-width: 1200px;
   margin: 0 auto;
   padding: 0 1.5rem 2rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* Hero Section */
@@ -968,6 +970,7 @@ export default {
   color: #1e293b;
   transition: all 0.2s;
   background: white;
+  box-sizing: border-box;
 }
 
 .form-input:focus {
@@ -1646,6 +1649,60 @@ export default {
   .hero-section {
     padding: 1.5rem 1rem;
     border-radius: 16px;
+    margin-bottom: 1.5rem;
+  }
+
+  .header-content {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .header-actions .btn {
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .category-tabs {
+    margin-bottom: 1.5rem;
+  }
+
+  .tabs-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .tab-btn {
+    flex: 1;
+    min-width: 100px;
+  }
+
+  .categories-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .category-card {
+    padding: 1.25rem;
+  }
+
+  .modal-content {
+    width: 95%;
+    max-width: 95%;
+    margin: 1rem;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
   }
 
   .hero-title {

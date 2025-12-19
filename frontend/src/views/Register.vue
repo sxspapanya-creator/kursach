@@ -379,13 +379,47 @@ export default {
   text-decoration: underline;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 768px) {
+  .auth-container {
+    padding: 0.75rem;
+  }
+
   .auth-card {
     padding: 2rem 1.5rem;
+    max-width: 100%;
   }
 
   .auth-title {
     font-size: 1.5rem;
+  }
+
+  .auth-form {
+    gap: 1.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-card {
+    padding: 1.5rem 1.25rem;
+    margin: 0 0.5rem;
+  }
+
+  .auth-title {
+    font-size: 1.375rem;
+  }
+
+  .auth-subtitle {
+    font-size: 0.875rem;
+  }
+
+  .form-input {
+    padding: 0.75rem 0.875rem;
+    font-size: 0.9rem;
+  }
+
+  .auth-button {
+    padding: 0.875rem;
+    font-size: 0.95rem;
   }
 }
 </style>

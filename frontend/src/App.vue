@@ -301,12 +301,15 @@ body {
   justify-content: space-between;
   height: 64px;
   position: relative;
+  gap: 1rem;
+  flex-wrap: nowrap;
 }
 
 .nav-left {
   flex: 0 0 auto;
   position: absolute;
   left: 1.5rem;
+  z-index: 1;
 }
 
 .nav-brand {
@@ -378,6 +381,7 @@ body {
   flex: 0 0 auto;
   position: absolute;
   right: 1.5rem;
+  z-index: 1;
 }
 
 .nav-user {
@@ -445,6 +449,8 @@ body {
   margin: 0 auto;
   padding: 2rem 1.5rem;
   min-height: calc(100vh - 64px);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .notification {
@@ -531,24 +537,39 @@ body {
 @media (max-width: 767px) {
   .nav-container {
     padding: 0 1rem;
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
   }
   .nav-left {
     left: 1rem;
+    position: relative;
+    flex: 0 0 auto;
+  }
+  .nav-center {
+    order: 3;
+    width: 100%;
+    margin-top: 0.5rem;
   }
   .nav-right {
     right: 1rem;
+    position: relative;
+    flex: 0 0 auto;
   }
   .nav-menu {
-    gap: 0.5rem;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+    justify-content: center;
   }
   .nav-link span {
     display: none;
   }
   .nav-link {
-    padding: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    min-width: 44px;
   }
-  .brand-link span {
-    display: none;
+  .brand-link {
+    font-size: 1.25rem;
   }
   .user-details {
     display: none;

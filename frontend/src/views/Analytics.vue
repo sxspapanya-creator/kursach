@@ -1640,19 +1640,14 @@ export default {
   }
 }
 
-/* Все остальные стили из предыдущей версии остаются без изменений */
+/* Основные стили страницы */
 .analytics-page {
   max-width: 1400px;
   margin: 0 auto;
   padding: 2rem;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-}
-
-.analytics-page {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 2rem;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 /* Заголовок */
@@ -1663,6 +1658,8 @@ export default {
   margin-bottom: 2.5rem;
   padding-bottom: 1.5rem;
   border-bottom: 2px solid #f0f0f0;
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
 .header h1 {
@@ -1676,6 +1673,7 @@ export default {
   display: flex;
   gap: 1rem;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .period-controls select,
@@ -1686,6 +1684,8 @@ export default {
   font-size: 1rem;
   background: white;
   transition: all 0.3s;
+  box-sizing: border-box;
+  min-width: 120px;
 }
 
 .period-controls select:focus,
@@ -2885,16 +2885,41 @@ export default {
     align-items: stretch;
   }
 
+  .header h1 {
+    font-size: 1.75rem;
+  }
+
   .period-controls {
     flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .period-controls select,
+  .period-controls input {
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .refresh-btn {
+    width: 100%;
   }
 
   .metrics-grid {
     grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .metric-card {
+    padding: 1.25rem;
   }
 
   .cash-gap-cards {
     grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+
+  .cash-gap-card {
+    padding: 1.25rem;
   }
 
   .recommendations-grid {
@@ -2903,6 +2928,7 @@ export default {
 
   .pie-chart-container {
     flex-direction: column;
+    gap: 1.5rem;
   }
 
   .category-stats {
@@ -2924,29 +2950,74 @@ export default {
     padding-bottom: 1rem;
     margin-bottom: 1rem;
   }
-}
 
-@media (max-width: 576px) {
-  .cash-gap-cards {
+  .regression-container {
     grid-template-columns: 1fr;
   }
 
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 576px) {
+  .analytics-page {
+    padding: 0.75rem;
+  }
+
+  .header h1 {
+    font-size: 1.5rem;
+  }
+
+  .cash-gap-cards {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .cash-gap-card {
+    padding: 1rem;
+  }
+
   .distribution-table {
-    font-size: 0.9rem;
+    font-size: 0.85rem;
   }
 
   .distribution-table th,
   .distribution-table td {
-    padding: 0.75rem;
+    padding: 0.5rem;
   }
 
   .categories-table th,
   .categories-table td {
-    padding: 0.75rem;
+    padding: 0.5rem;
+    font-size: 0.85rem;
   }
 
   .categories-table {
-    font-size: 0.9rem;
+    font-size: 0.85rem;
+  }
+
+  .metric-card {
+    padding: 1rem;
+  }
+
+  .metric-value {
+    font-size: 1.5rem;
+  }
+
+  .line-chart-container {
+    padding: 1rem;
+  }
+
+  .trend-summary {
+    padding: 1rem;
   }
 }
 </style>

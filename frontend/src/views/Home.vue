@@ -561,6 +561,8 @@ export default {
   max-width: 1200px;
   margin: 0 auto;
   padding: 0 1.5rem 2rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* Hero Section */
@@ -1249,6 +1251,7 @@ export default {
   .hero-section {
     padding: 2rem 1rem;
     border-radius: 16px;
+    margin-bottom: 1.5rem;
   }
 
   .hero-title {
@@ -1263,31 +1266,80 @@ export default {
 
   .hero-subtitle {
     font-size: 1rem;
+    margin-bottom: 1.5rem;
   }
 
   .hero-stats {
     flex-direction: column;
     gap: 1.5rem;
+    margin-top: 1.5rem;
+  }
+
+  .hero-stat .stat-value {
+    font-size: 1.5rem;
   }
 
   .period-stats-grid {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
 
   .dashboard-stats {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
 
   .actions-grid {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
 
   .transactions-list {
-    grid-template-columns: 1fr;
+    gap: 0.75rem;
   }
 
   .category-name {
     max-width: 80px;
+  }
+
+  .section-title {
+    font-size: 1.25rem;
+  }
+
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-section {
+    padding: 1.5rem 1rem;
+  }
+
+  .hero-title {
+    font-size: 1.5rem;
+  }
+
+  .hero-stats {
+    gap: 1rem;
+  }
+
+  .hero-stat .stat-value {
+    font-size: 1.25rem;
+  }
+
+  .stat-card {
+    padding: 1.25rem;
+  }
+
+  .action-card {
+    padding: 1.25rem;
+  }
+
+  .transaction-card {
+    padding: 1rem;
   }
 }
 </style>

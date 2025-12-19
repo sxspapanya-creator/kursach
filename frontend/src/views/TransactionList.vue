@@ -478,6 +478,8 @@ export default {
   max-width: 1200px;
   margin: 0 auto;
   padding: 0 1.5rem 2rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* Hero Section */
@@ -691,6 +693,8 @@ export default {
   background: white;
   color: #1e293b;
   transition: border-color 0.2s;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .filter-select:focus,
@@ -1095,6 +1099,30 @@ export default {
   .header-actions {
     width: 100%;
     flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .header-actions .btn {
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .filters-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .filter-group {
+    width: 100%;
+  }
+
+  .transactions-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .transaction-card {
+    padding: 1rem;
   }
 
   .filters-grid {

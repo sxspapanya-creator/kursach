@@ -368,6 +368,8 @@ export default {
   max-width: 600px;
   margin: 0 auto;
   padding: 0 1rem 2rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* Заголовок */
@@ -546,6 +548,8 @@ export default {
 /* Ввод суммы */
 .amount-input-wrapper {
   max-width: 300px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .amount-input {
@@ -561,6 +565,7 @@ export default {
   border-radius: 12px;
   text-align: right;
   transition: all 0.2s;
+  box-sizing: border-box;
 }
 
 .amount-field:focus {
@@ -708,6 +713,7 @@ export default {
   font-size: 0.95rem;
   transition: all 0.2s;
   background: white;
+  box-sizing: border-box;
 }
 
 .form-input:focus {
@@ -971,9 +977,17 @@ export default {
 }
 
 /* Адаптивность */
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .add-transaction {
-    padding: 0 0.75rem 1.5rem;
+    padding: 0 1rem 1.5rem;
+  }
+
+  .page-header {
+    margin-bottom: 1.5rem;
+  }
+
+  .page-title {
+    font-size: 1.5rem;
   }
 
   .form-container {
@@ -982,6 +996,11 @@ export default {
 
   .type-selector {
     grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .type-option {
+    padding: 1.25rem;
   }
 
   .amount-field {
@@ -996,18 +1015,48 @@ export default {
 
   .categories-grid {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 0.75rem;
   }
 
   .payment-methods {
     grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
   }
 
   .form-actions {
     flex-direction: column;
+    gap: 0.75rem;
   }
 
   .btn {
     width: 100%;
+    justify-content: center;
+  }
+
+  .section-title {
+    font-size: 1.125rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .add-transaction {
+    padding: 0 0.75rem 1rem;
+  }
+
+  .form-container {
+    padding: 1.25rem;
+  }
+
+  .amount-field {
+    font-size: 1.5rem;
+  }
+
+  .categories-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .payment-methods {
+    grid-template-columns: 1fr;
   }
 }
 </style>
