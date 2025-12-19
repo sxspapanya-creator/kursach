@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Transaction;
+use App\Models\Category;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 class TransactionController extends Controller
@@ -11,7 +13,15 @@ class TransactionController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Transaction::with('category');
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $query = Transaction::where('user_id', $userId)->with('category');
 
             // Фильтрация по типу
             if ($request->has('type') && in_array($request->type, ['income', 'expense'])) {
@@ -70,6 +80,14 @@ class TransactionController extends Controller
     public function store(Request $request)
     {
         try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
             $validated = $request->validate([
                 'amount' => 'required|numeric|min:0.01',
                 'type' => 'required|in:income,expense',
@@ -79,6 +97,20 @@ class TransactionController extends Controller
                 'payment_method' => 'required|in:cash,card,transfer,other'
             ]);
 
+            // Проверяем, что категория принадлежит текущему пользователю
+            $category = Category::where('user_id', $userId)
+                ->where('id', $validated['category_id'])
+                ->first();
+            
+            if (!$category) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Validation failed',
+                    'errors' => ['category_id' => ['Категория не найдена или не принадлежит вам.']]
+                ], 422);
+            }
+
+            $validated['user_id'] = $userId;
             $transaction = Transaction::create($validated);
 
             return response()->json([
@@ -103,7 +135,17 @@ class TransactionController extends Controller
     public function show($id)
     {
         try {
-            $transaction = Transaction::with('category')->findOrFail($id);
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $transaction = Transaction::where('user_id', $userId)
+                ->with('category')
+                ->findOrFail($id);
 
             return response()->json([
                 'status' => 'success',
@@ -120,7 +162,15 @@ class TransactionController extends Controller
     public function update(Request $request, $id)
     {
         try {
-            $transaction = Transaction::findOrFail($id);
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $transaction = Transaction::where('user_id', $userId)->findOrFail($id);
 
             $validated = $request->validate([
                 'amount' => 'sometimes|required|numeric|min:0.01',
@@ -130,6 +180,21 @@ class TransactionController extends Controller
                 'date' => 'sometimes|required|date',
                 'payment_method' => 'sometimes|required|in:cash,card,transfer,other'
             ]);
+
+            // Если изменяется категория, проверяем, что она принадлежит текущему пользователю
+            if (isset($validated['category_id'])) {
+                $category = Category::where('user_id', $userId)
+                    ->where('id', $validated['category_id'])
+                    ->first();
+                
+                if (!$category) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Validation failed',
+                        'errors' => ['category_id' => ['Категория не найдена или не принадлежит вам.']]
+                    ], 422);
+                }
+            }
 
             $transaction->update($validated);
 
@@ -155,7 +220,15 @@ class TransactionController extends Controller
     public function destroy($id)
     {
         try {
-            $transaction = Transaction::findOrFail($id);
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $transaction = Transaction::where('user_id', $userId)->findOrFail($id);
             $transaction->delete();
 
             return response()->json([
@@ -175,15 +248,25 @@ class TransactionController extends Controller
     public function summary(Request $request)
     {
         try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
             $month = $request->get('month', date('m'));
             $year = $request->get('year', date('Y'));
 
-            $income = Transaction::where('type', 'income')
+            $income = Transaction::where('user_id', $userId)
+                ->where('type', 'income')
                 ->whereMonth('date', $month)
                 ->whereYear('date', $year)
                 ->sum('amount');
 
-            $expenses = Transaction::where('type', 'expense')
+            $expenses = Transaction::where('user_id', $userId)
+                ->where('type', 'expense')
                 ->whereMonth('date', $month)
                 ->whereYear('date', $year)
                 ->sum('amount');
@@ -213,9 +296,18 @@ class TransactionController extends Controller
     public function recent(Request $request)
     {
         try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
             $limit = $request->get('limit', 10);
 
-            $transactions = Transaction::with('category')
+            $transactions = Transaction::where('user_id', $userId)
+                ->with('category')
                 ->orderBy('date', 'desc')
                 ->orderBy('created_at', 'desc')
                 ->take($limit)

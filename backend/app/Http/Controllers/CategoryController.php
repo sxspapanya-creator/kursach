@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Category;
 use App\Models\Transaction;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 class CategoryController extends Controller
@@ -12,7 +13,16 @@ class CategoryController extends Controller
     public function index()
     {
         try {
-            $categories = Category::withCount(['transactions as transactions_count'])
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $categories = Category::where('user_id', $userId)
+                ->withCount(['transactions as transactions_count'])
                 ->withSum(['transactions as transactions_amount'], 'amount')
                 ->orderBy('type')
                 ->orderBy('name')
@@ -33,8 +43,16 @@ class CategoryController extends Controller
     public function store(Request $request)
     {
         try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
             $validated = $request->validate([
-                'name' => 'required|string|max:255|unique:categories,name',
+                'name' => 'required|string|max:255',
                 'type' => 'required|in:income,expense',
                 'color' => 'nullable|string|max:7',
                 'budget_limit' => [
@@ -49,10 +67,24 @@ class CategoryController extends Controller
                 ],
             ]);
 
+            // Проверяем уникальность имени для текущего пользователя
+            $existingCategory = Category::where('user_id', $userId)
+                ->where('name', $validated['name'])
+                ->first();
+            
+            if ($existingCategory) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Validation failed',
+                    'errors' => ['name' => ['Категория с таким именем уже существует.']]
+                ], 422);
+            }
+
             if ($validated['type'] === 'income') {
                 $validated['budget_limit'] = null;
             }
 
+            $validated['user_id'] = $userId;
             $category = Category::create($validated);
 
             $category->transactions_count = 0;
@@ -80,7 +112,16 @@ class CategoryController extends Controller
     public function show($id)
     {
         try {
-            $category = Category::withCount(['transactions as transactions_count'])
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $category = Category::where('user_id', $userId)
+                ->withCount(['transactions as transactions_count'])
                 ->withSum(['transactions as transactions_amount'], 'amount')
                 ->findOrFail($id);
 
@@ -99,10 +140,18 @@ class CategoryController extends Controller
     public function update(Request $request, $id)
     {
         try {
-            $category = Category::findOrFail($id);
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $category = Category::where('user_id', $userId)->findOrFail($id);
 
             $validated = $request->validate([
-                'name' => 'sometimes|required|string|max:255|unique:categories,name,' . $id,
+                'name' => 'sometimes|required|string|max:255',
                 'type' => 'sometimes|required|in:income,expense',
                 'color' => 'nullable|string|max:7',
                 'budget_limit' => [
@@ -122,6 +171,22 @@ class CategoryController extends Controller
                     },
                 ],
             ]);
+
+            // Проверяем уникальность имени для текущего пользователя (исключая текущую категорию)
+            if (isset($validated['name'])) {
+                $existingCategory = Category::where('user_id', $userId)
+                    ->where('name', $validated['name'])
+                    ->where('id', '!=', $id)
+                    ->first();
+                
+                if ($existingCategory) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Validation failed',
+                        'errors' => ['name' => ['Категория с таким именем уже существует.']]
+                    ], 422);
+                }
+            }
 
             if (($validated['type'] ?? $category->type) === 'income') {
                 $validated['budget_limit'] = null;
@@ -154,7 +219,15 @@ class CategoryController extends Controller
     public function destroy($id)
     {
         try {
-            $category = Category::findOrFail($id);
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $category = Category::where('user_id', $userId)->findOrFail($id);
 
             $transactionCount = $category->transactions()->count();
             if ($transactionCount > 0) {
@@ -181,10 +254,18 @@ class CategoryController extends Controller
     public function withTransactions(Request $request)
     {
         try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
             $month = $request->month ?? now()->month;
             $year = $request->year ?? now()->year;
 
-            $categories = Category::query()
+            $categories = Category::where('user_id', $userId)
                 // Общая статистика
                 ->withCount(['transactions as transaction_count'])
                 ->withSum(['transactions as total_amount'], 'amount')
@@ -237,10 +318,18 @@ class CategoryController extends Controller
     public function withStats(Request $request)
     {
         try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
             $month = $request->input('month', now()->month);
             $year = $request->input('year', now()->year);
 
-            $categories = Category::query()
+            $categories = Category::where('user_id', $userId)
                 // Общее количество транзакций
                 ->withCount(['transactions as transaction_count'])
                 // Сумма всех транзакций

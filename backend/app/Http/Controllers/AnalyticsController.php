@@ -5,24 +5,38 @@ namespace App\Http\Controllers;
 use App\Models\Transaction;
 use App\Models\Category;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 class AnalyticsController extends Controller
 {
     /**
+     * Получить ID текущего пользователя
+     */
+    protected function getUserId()
+    {
+        $userId = Auth::id();
+        if (!$userId) {
+            abort(401, 'Unauthorized');
+        }
+        return $userId;
+    }
+    /**
      * Общий обзор аналитики
      */
     public function overview(Request $request)
     {
         try {
+            $userId = $this->getUserId();
+            
             // Параметры периода
             $period = $request->input('period', 'month');
             $year = $request->input('year', date('Y'));
             $month = $request->input('month', date('m'));
 
             // Базовые данные
-            $baseData = $this->getBaseAnalytics($year, $month, $period);
+            $baseData = $this->getBaseAnalytics($year, $month, $period, $userId);
 
             // Прогнозы с линейной регрессией
             $forecasts = $this->calculateForecasts();
@@ -126,9 +140,13 @@ class AnalyticsController extends Controller
     /**
      * Базовые показатели аналитики
      */
-    private function getBaseAnalytics($year, $month, $period = 'month')
+    private function getBaseAnalytics($year, $month, $period = 'month', $userId = null)
     {
         try {
+            if (!$userId) {
+                $userId = $this->getUserId();
+            }
+            
             $startDate = null;
             $endDate = null;
             $label = '';
@@ -159,7 +177,8 @@ class AnalyticsController extends Controller
             }
 
             // Доходы и расходы за период
-            $transactions = Transaction::whereBetween('date', [$startDate, $endDate])
+            $transactions = Transaction::where('user_id', $userId)
+                ->whereBetween('date', [$startDate, $endDate])
                 ->selectRaw('SUM(CASE WHEN type = "income" THEN amount ELSE 0 END) as total_income')
                 ->selectRaw('SUM(CASE WHEN type = "expense" THEN amount ELSE 0 END) as total_expense')
                 ->first();
