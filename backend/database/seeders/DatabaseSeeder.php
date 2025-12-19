@@ -19,5 +19,10 @@ class DatabaseSeeder extends Seeder
             'name' => 'Test User',
             'email' => 'test@example.com',
         ]);
+
+        // Запускаем seeder для тестовых данных аналитики
+        $this->call([
+            AnalyticsTestDataSeeder::class,
+        ]);
     }
 }
