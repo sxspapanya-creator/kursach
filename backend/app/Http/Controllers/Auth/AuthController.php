@@ -16,7 +16,7 @@ class AuthController extends Controller
 {
     public function login(Request $request)
     {
-        try {
+//        try {
             $validated = $request->validate([
                 'email' => 'required|email|max:255',
                 'password' => 'required|string|min:6|max:255'
@@ -42,20 +42,20 @@ class AuthController extends Controller
             $session->put('token', $token->plainTextToken);
 
             return redirect()->intended();
-        } catch (ValidationException $e) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Login failed'
-            ], 500);
-        }
+//        } catch (ValidationException $e) {
+//            return response()->json([
+//                'message' => 'Validation failed',
+//                'errors' => $e->errors()
+//            ], 422);
+//        } catch (\Exception $e) {
+//            return response()->json([
+//                'message' => 'Login failed'
+//            ], 500);
+//        }
     }
 
     public function register(Request $request) {
-        try {
+//        try {
             $validated = $request->validate([
                 'name' => 'required|string|min:2|max:255',
                 'email' => 'required|email|max:255|unique:users,email',
@@ -75,16 +75,16 @@ class AuthController extends Controller
             $session->put('token', $token->plainTextToken);
 
             return redirect()->intended();
-        } catch (ValidationException $e) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Registration failed'
-            ], 500);
-        }
+//        } catch (ValidationException $e) {
+//            return response()->json([
+//                'message' => 'Validation failed',
+//                'errors' => $e->errors()
+//            ], 422);
+//        } catch (\Exception $e) {
+//            return response()->json([
+//                'message' => 'Registration failed'
+//            ], 500);
+//        }
     }
 
     public function user(Request $request)

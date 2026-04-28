@@ -109,10 +109,10 @@
             </div>
           </div>
 
-          <!-- Категория -->
+          <!-- Категории (множественный выбор) -->
           <div class="form-section">
             <div class="form-header">
-              <h3 class="section-title">Категория</h3>
+              <h3 class="section-title">Категории</h3>
               <router-link to="/categories" class="category-manage">
                 Управление
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -139,17 +139,17 @@
                   v-for="category in filteredCategories"
                   :key="category.id"
                   class="category-option"
-                  :class="{ selected: form.category_id === category.id }"
-                  @click="form.category_id = category.id"
+                  :class="{ selected: form.category_ids.includes(category.id) }"
+                  @click="toggleCategory(category.id)"
               >
                 <div class="category-info">
-                  <div class="category-color" :style="{ backgroundColor: category.color }"></div>
+                  <div class="category-color" :style="{ backgroundColor: category.color || '#95a5a6' }"></div>
                   <div class="category-name">{{ category.name }}</div>
                 </div>
                 <div class="category-budget" v-if="category.budget_limit">
                   Лимит: {{ formatMoney(category.budget_limit) }}
                 </div>
-                <div v-if="form.category_id === category.id" class="category-check">
+                <div v-if="form.category_ids.includes(category.id)" class="category-check">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M20 6L9 17l-5-5"/>
                   </svg>
@@ -265,6 +265,7 @@ export default {
     const amountError = ref('')
     const categories = ref([])
     const budgetWarning = ref(null)
+    const isDataLoaded = ref(false)  // ← добавить флаг
 
     const paymentMethods = [
       { value: 'card', name: 'Карта', icon: '💳' },
@@ -275,72 +276,98 @@ export default {
     const form = ref({
       amount: '',
       type: 'expense',
-      category_id: '',
+      category_ids: [],
       description: '',
       date: new Date().toISOString().split('T')[0],
-      payment_method: 'card',
-      priority: 'normal'
+      payment_method: 'card'
     })
 
     const filteredCategories = computed(() => {
+      if (!categories.value || !Array.isArray(categories.value)) {
+        return []
+      }
       return categories.value
-          .filter(cat => cat.type === form.value.type)
-          .sort((a, b) => a.name.localeCompare(b.name))
+          .filter(cat => cat && cat.type === form.value.type)
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
     })
 
     const isFormValid = computed(() => {
-      return form.value.amount > 0 && form.value.category_id && form.value.date
+      return form.value.amount > 0 &&
+          form.value.category_ids &&
+          form.value.category_ids.length > 0 &&
+          form.value.date
     })
 
     const fetchTransaction = async () => {
       try {
         loading.value = true
-        error.value = ''
+        error.value = false
+        isDataLoaded.value = false
 
         const transactionId = props.id || route.params.id
-        console.log('Fetching transaction ID:', transactionId)
 
+        // Загружаем оба ресурса
         const [transactionRes, categoriesRes] = await Promise.all([
           axios.get(`/api/transactions/${transactionId}`),
           axios.get('/api/categories')
         ])
 
-        console.log('Transaction response:', transactionRes.data)
-
         const transactionData = transactionRes.data.data || transactionRes.data
+        const categoriesData = categoriesRes.data.data || categoriesRes.data
 
         if (!transactionData) {
           throw new Error('Транзакция не найдена')
         }
 
-        if (transactionData.date) {
-          transactionData.date = transactionData.date.split('T')[0]
+        // Сохраняем категории
+        categories.value = categoriesData
+
+        // Форматируем дату
+        let formattedDate = transactionData.date
+        if (formattedDate) {
+          formattedDate = formattedDate.split('T')[0]
         }
 
-        form.value = {
-          amount: transactionData.amount || '',
-          type: transactionData.type || 'expense',
-          category_id: transactionData.category_id || transactionData.category?.id || '',
-          description: transactionData.description || '',
-          date: transactionData.date || new Date().toISOString().split('T')[0],
-          payment_method: transactionData.payment_method || 'card',
-          priority: transactionData.priority || 'normal'
+        // Получаем ID категорий
+        let categoryIds = []
+        if (transactionData.categories && Array.isArray(transactionData.categories)) {
+          categoryIds = transactionData.categories.map(cat => cat.id)
+        } else if (transactionData.category_id) {
+          categoryIds = [transactionData.category_id]
+        } else if (transactionData.category && transactionData.category.id) {
+          categoryIds = [transactionData.category.id]
         }
 
-        categories.value = categoriesRes.data.data || categoriesRes.data
+        // Обновляем форму
+        form.value.amount = transactionData.amount || ''
+        form.value.type = transactionData.type || 'expense'
+        form.value.category_ids = categoryIds
+        form.value.description = transactionData.description || ''
+        form.value.date = formattedDate
+        form.value.payment_method = transactionData.payment_method || 'card'
+
+        isDataLoaded.value = true
+
+        console.log('Data loaded. Category IDs:', form.value.category_ids)
 
       } catch (err) {
         console.error('Error fetching transaction:', err)
-        console.error('Response:', err.response)
-
-        if (err.response?.status === 404) {
-          error.value = 'Транзакция не найдена'
-        } else {
-          error.value = err.response?.data?.message || err.message || 'Не удалось загрузить транзакцию'
-        }
+        error.value = err.response?.status === 404
+            ? 'Транзакция не найдена'
+            : (err.response?.data?.message || err.message || 'Не удалось загрузить транзакцию')
       } finally {
         loading.value = false
       }
+    }
+
+    const toggleCategory = (categoryId) => {
+      const index = form.value.category_ids.indexOf(categoryId)
+      if (index === -1) {
+        form.value.category_ids.push(categoryId)
+      } else {
+        form.value.category_ids.splice(index, 1)
+      }
+      console.log('Toggled category. New IDs:', form.value.category_ids)
     }
 
     const validateAmount = () => {
@@ -370,32 +397,28 @@ export default {
         error.value = ''
 
         const transactionId = props.id || route.params.id
-        console.log('Updating transaction ID:', transactionId)
 
         const transactionData = {
-          ...form.value,
-          amount: parseFloat(form.value.amount)
+          amount: parseFloat(form.value.amount),
+          type: form.value.type,
+          category_ids: form.value.category_ids,
+          description: form.value.description,
+          date: form.value.date,
+          payment_method: form.value.payment_method
         }
-
-        console.log('Sending data:', transactionData)
 
         await axios.put(`/api/transactions/${transactionId}`, transactionData)
 
         if (window.showNotification) {
           window.showNotification('success', 'Транзакция успешно обновлена')
-        } else {
-          alert('Транзакция успешно обновлена')
         }
 
         router.push('/transactions')
       } catch (err) {
         console.error('Error updating transaction:', err)
-        console.error('Response:', err.response)
-
         error.value = err.response?.data?.message ||
-            err.response?.data?.errors?.amount?.[0] ||
+            err.response?.data?.errors?.category_ids?.[0] ||
             'Ошибка при обновлении транзакции'
-
         window.scrollTo({ top: 0, behavior: 'smooth' })
       } finally {
         submitting.value = false
@@ -407,7 +430,7 @@ export default {
     })
 
     watch(() => form.value.type, () => {
-      form.value.category_id = ''
+      form.value.category_ids = []
     })
 
     return {
@@ -422,6 +445,7 @@ export default {
       budgetWarning,
       isFormValid,
       validateAmount,
+      toggleCategory,
       formatMoney,
       fetchTransaction,
       updateTransaction
@@ -877,65 +901,6 @@ export default {
   font-size: 0.75rem;
   font-weight: 500;
   color: #475569;
-}
-
-.priority-select {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.priority-option {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.priority-option:hover {
-  border-color: #cbd5e1;
-}
-
-.priority-option.selected {
-  border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.05);
-}
-
-.priority-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-}
-
-.priority-option.essential .priority-dot {
-  background: #ef4444;
-}
-
-.priority-option.important .priority-dot {
-  background: #f59e0b;
-}
-
-.priority-option.normal .priority-dot {
-  background: #3b82f6;
-}
-
-.priority-option.optional .priority-dot {
-  background: #94a3b8;
-}
-
-.priority-name {
-  font-size: 0.875rem;
-  color: #475569;
-  font-weight: 500;
-}
-
-.priority-option.selected .priority-name {
-  color: #1e293b;
-  font-weight: 600;
 }
 
 /* Предупреждения */

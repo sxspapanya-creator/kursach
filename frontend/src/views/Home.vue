@@ -243,9 +243,20 @@
             @click="editTransaction(transaction)"
         >
           <div class="transaction-header">
-            <div class="category-badge" :style="{ backgroundColor: transaction.category.color + '20' }">
-              <div class="category-color" :style="{ backgroundColor: transaction.category.color }"></div>
-              <span class="category-name">{{ transaction.category.name }}</span>
+            <div class="categories-container">
+              <div
+                  v-for="cat in transaction.categories"
+                  :key="cat.id"
+                  class="category-badge"
+                  :style="{ backgroundColor: cat.color + '20' }"
+              >
+                <div class="category-color" :style="{ backgroundColor: cat.color }"></div>
+                <span class="category-name">{{ cat.name }}</span>
+              </div>
+              <div v-if="!transaction.categories || transaction.categories.length === 0" class="category-badge">
+                <div class="category-color" :style="{ backgroundColor: '#94a3b8' }"></div>
+                <span class="category-name">Неизвестно</span>
+              </div>
             </div>
             <div class="transaction-type" :class="transaction.type">
               <span>{{ transaction.type === 'income' ? 'Доход' : 'Расход' }}</span>
@@ -500,18 +511,24 @@ export default {
           console.warn('Не удалось получить последние транзакции:', recentData)
         }
 
-        recentTransactions.value = recentTransactionsData.map(t => ({
-          id: t.id,
-          amount: t.amount,
-          type: t.type,
-          description: t.description,
-          date: t.date,
-          category: {
-            id: t.category_id,
-            name: t.category?.name || 'Неизвестно',
-            color: t.category?.color || '#94a3b8'
+        recentTransactions.value = recentTransactionsData.map(t => {
+          let categories = []
+          if (t.categories && Array.isArray(t.categories) && t.categories.length > 0) {
+            categories = t.categories.map(cat => ({
+              id: cat.id,
+              name: cat.name,
+              color: cat.color
+            }))
           }
-        }))
+          return {
+            id: t.id,
+            amount: t.amount,
+            type: t.type,
+            description: t.description,
+            date: t.date,
+            categories: categories
+          }
+        })
 
         console.log('Последние транзакции обработаны:', recentTransactions.value.length)
         
@@ -788,6 +805,13 @@ export default {
 .period-stat-total {
   font-size: 1.25rem;
   font-weight: 700;
+}
+
+.categories-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .period-stat-total.positive {

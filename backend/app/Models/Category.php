@@ -2,15 +2,25 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Category extends Model
 {
     protected $fillable = [
-        'name', 'type', 'color', 'budget_limit', 'user_id'
+        'user_id',
+        'name',
+        'type',
+        'color',
     ];
 
-    public function transactions()
+    public function user(): BelongsTo
     {
-        return $this->hasMany(Transaction::class);
+        return $this->belongsTo(User::class);
+    }
+
+    public function transactions(): BelongsToMany
+    {
+        return $this->belongsToMany(Transaction::class, 'category_transaction');
     }
 }

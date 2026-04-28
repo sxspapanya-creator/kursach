@@ -24,7 +24,8 @@ class TransactionController extends Controller
 
             $validated = $request->validate([
                 'type' => 'nullable|in:income,expense',
-                'category_id' => 'nullable|integer|exists:categories,id',
+                'category_ids' => 'nullable|array',
+                'category_ids.*' => 'integer|exists:categories,id',
                 'month' => 'nullable|integer|min:1|max:12',
                 'year' => 'nullable|integer|min:2000|max:2100',
                 'date_from' => 'nullable|date',
@@ -32,21 +33,26 @@ class TransactionController extends Controller
                 'limit' => 'nullable|integer|min:1|max:10000'
             ]);
 
-            $query = Transaction::where('user_id', $userId)->with('category');
+            $query = Transaction::where('user_id', $userId)->with('categories');
 
             // Фильтрация по типу
             if (isset($validated['type'])) {
                 $query->where('type', $validated['type']);
             }
 
-            // Фильтрация по категории
-            if (isset($validated['category_id'])) {
-                // Проверяем, что категория принадлежит пользователю
-                $category = Category::where('user_id', $userId)
-                    ->where('id', $validated['category_id'])
-                    ->first();
-                if ($category) {
-                    $query->where('category_id', $validated['category_id']);
+            // Фильтрация по категориям (многие ко многим)
+            if (isset($validated['category_ids']) && !empty($validated['category_ids'])) {
+                $categoryIds = $validated['category_ids'];
+
+                $validCategoryIds = Category::where('user_id', $userId)
+                    ->whereIn('id', $categoryIds)
+                    ->pluck('id')
+                    ->toArray();
+
+                if (!empty($validCategoryIds)) {
+                    $query->whereHas('categories', function($q) use ($validCategoryIds) {
+                        $q->whereIn('categories.id', $validCategoryIds);
+                    });
                 }
             }
 
@@ -69,7 +75,6 @@ class TransactionController extends Controller
                 $query->where('date', '<=', $validated['date_to']);
             }
 
-            // Лимит для пагинации
             $limit = $validated['limit'] ?? 50;
 
             $transactions = $query->orderBy('date', 'desc')
@@ -116,32 +121,46 @@ class TransactionController extends Controller
             $validated = $request->validate([
                 'amount' => 'required|numeric|min:0.01',
                 'type' => 'required|in:income,expense',
-                'category_id' => 'required|exists:categories,id',
+                'category_ids' => 'required|array|min:1',
+                'category_ids.*' => 'integer|exists:categories,id',
                 'description' => 'nullable|string|max:500',
                 'date' => 'required|date',
-                'payment_method' => 'required|in:cash,card,transfer,other'
+                'payment_method' => 'required|in:cash,card,transfer'
             ]);
 
-            // Проверяем, что категория принадлежит текущему пользователю
-            $category = Category::where('user_id', $userId)
-                ->where('id', $validated['category_id'])
-                ->first();
-            
-            if (!$category) {
+            // Проверяем, что все категории принадлежат пользователю
+            $categoryIds = $validated['category_ids'];
+            $validCategoryIds = Category::where('user_id', $userId)
+                ->whereIn('id', $categoryIds)
+                ->pluck('id')
+                ->toArray();
+
+            if (count($validCategoryIds) !== count($categoryIds)) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Validation failed',
-                    'errors' => ['category_id' => ['Категория не найдена или не принадлежит вам.']]
+                    'errors' => ['category_ids' => ['Одна или несколько категорий не найдены или не принадлежат вам.']]
                 ], 422);
             }
 
-            $validated['user_id'] = $userId;
-            $transaction = Transaction::create($validated);
+            // Создаем транзакцию (без category_id)
+            $transaction = Transaction::create([
+                'amount' => $validated['amount'],
+                'type' => $validated['type'],
+                'description' => $validated['description'] ?? null,
+                'date' => $validated['date'],
+                'payment_method' => $validated['payment_method'],
+                'user_id' => $userId,
+                'currency_id' => 1 // ID базовой валюты, можно сделать динамически
+            ]);
+
+            // Привязываем категории
+            $transaction->categories()->attach($validCategoryIds);
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Transaction created successfully',
-                'data' => $transaction->load('category')
+                'data' => $transaction->load('categories')
             ], 201);
         } catch (ValidationException $e) {
             return response()->json([
@@ -152,7 +171,7 @@ class TransactionController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to create transaction'
+                'message' => 'Failed to create transaction: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -169,7 +188,7 @@ class TransactionController extends Controller
             }
 
             $transaction = Transaction::where('user_id', $userId)
-                ->with('category')
+                ->with('categories')
                 ->findOrFail($id);
 
             return response()->json([
@@ -200,33 +219,43 @@ class TransactionController extends Controller
             $validated = $request->validate([
                 'amount' => 'sometimes|required|numeric|min:0.01',
                 'type' => 'sometimes|required|in:income,expense',
-                'category_id' => 'sometimes|required|exists:categories,id',
+                'category_ids' => 'sometimes|required|array|min:1',
+                'category_ids.*' => 'integer|exists:categories,id',
                 'description' => 'nullable|string|max:500',
                 'date' => 'sometimes|required|date',
-                'payment_method' => 'sometimes|required|in:cash,card,transfer,other'
+                'payment_method' => 'sometimes|required|in:cash,card,transfer'
             ]);
 
-            // Если изменяется категория, проверяем, что она принадлежит текущему пользователю
-            if (isset($validated['category_id'])) {
-                $category = Category::where('user_id', $userId)
-                    ->where('id', $validated['category_id'])
-                    ->first();
-                
-                if (!$category) {
+            // Если обновляются категории
+            if (isset($validated['category_ids'])) {
+                $categoryIds = $validated['category_ids'];
+                $validCategoryIds = Category::where('user_id', $userId)
+                    ->whereIn('id', $categoryIds)
+                    ->pluck('id')
+                    ->toArray();
+
+                if (count($validCategoryIds) !== count($categoryIds)) {
                     return response()->json([
                         'status' => 'error',
                         'message' => 'Validation failed',
-                        'errors' => ['category_id' => ['Категория не найдена или не принадлежит вам.']]
+                        'errors' => ['category_ids' => ['Одна или несколько категорий не найдены или не принадлежат вам.']]
                     ], 422);
                 }
+
+                // Синхронизируем категории
+                $transaction->categories()->sync($validCategoryIds);
             }
 
-            $transaction->update($validated);
+            // Обновляем остальные поля (исключая category_ids)
+            $updateData = collect($validated)->except(['category_ids'])->toArray();
+            if (!empty($updateData)) {
+                $transaction->update($updateData);
+            }
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Transaction updated successfully',
-                'data' => $transaction->load('category')
+                'data' => $transaction->load('categories')
             ]);
         } catch (ValidationException $e) {
             return response()->json([
@@ -254,6 +283,8 @@ class TransactionController extends Controller
             }
 
             $transaction = Transaction::where('user_id', $userId)->findOrFail($id);
+
+            // Категории отвяжутся автоматически (cascade)
             $transaction->delete();
 
             return response()->json([
@@ -267,8 +298,6 @@ class TransactionController extends Controller
             ], 404);
         }
     }
-
-    // Дополнительные методы для статистики
 
     public function summary(Request $request)
     {
@@ -341,7 +370,7 @@ class TransactionController extends Controller
             $limit = $validated['limit'] ?? 10;
 
             $transactions = Transaction::where('user_id', $userId)
-                ->with('category')
+                ->with('categories')
                 ->orderBy('date', 'desc')
                 ->orderBy('created_at', 'desc')
                 ->take($limit)

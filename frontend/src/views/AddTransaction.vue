@@ -122,17 +122,17 @@
                 v-for="category in filteredCategories"
                 :key="category.id"
                 class="category-option"
-                :class="{ selected: form.category_id === category.id }"
-                @click="form.category_id = category.id"
+                :class="{ selected: form.category_ids.includes(category.id) }"
+                @click="toggleCategory(category.id)"
             >
               <div class="category-info">
-                <div class="category-color" :style="{ backgroundColor: category.color }"></div>
+                <div class="category-color" :style="{ backgroundColor: category.color || '#95a5a6' }"></div>
                 <div class="category-name">{{ category.name }}</div>
               </div>
               <div class="category-budget" v-if="category.budget_limit">
                 Лимит: {{ formatMoney(category.budget_limit) }}
               </div>
-              <div v-if="form.category_id === category.id" class="category-check">
+              <div v-if="form.category_ids.includes(category.id)" class="category-check">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M20 6L9 17l-5-5"/>
                 </svg>
@@ -257,11 +257,10 @@ export default {
     const form = ref({
       amount: '',
       type: 'expense',
-      category_id: '',
+      category_ids: [],  // ← ИЗМЕНЕНО: массив
       description: '',
       date: new Date().toISOString().split('T')[0],
       payment_method: 'card',
-      priority: 'normal'
     })
 
     const filteredCategories = computed(() => {
@@ -271,14 +270,14 @@ export default {
     })
 
     const isFormValid = computed(() => {
-      return form.value.amount > 0 && form.value.category_id && form.value.date
+      return form.value.amount > 0 &&
+          form.value.category_ids.length > 0 &&  // ← ИЗМЕНЕНО
+          form.value.date
     })
 
     const fetchCategories = async () => {
       try {
-        const response = await axios.get('/api/categories', {
-          params: { with_stats: true }
-        })
+        const response = await axios.get('/api/categories')
         categories.value = response.data.data || []
       } catch (error) {
         console.error('Error fetching categories:', error)
@@ -293,6 +292,15 @@ export default {
         amountError.value = 'Слишком большая сумма'
       } else {
         amountError.value = ''
+      }
+    }
+
+    const toggleCategory = (categoryId) => {  // ← НОВЫЙ МЕТОД
+      const index = form.value.category_ids.indexOf(categoryId)
+      if (index === -1) {
+        form.value.category_ids.push(categoryId)
+      } else {
+        form.value.category_ids.splice(index, 1)
       }
     }
 
@@ -312,13 +320,16 @@ export default {
         error.value = ''
 
         const transactionData = {
-          ...form.value,
-          amount: parseFloat(form.value.amount)
+          amount: parseFloat(form.value.amount),
+          type: form.value.type,
+          category_ids: form.value.category_ids,  // ← ИЗМЕНЕНО
+          description: form.value.description,
+          date: form.value.date,
+          payment_method: form.value.payment_method
         }
 
         await axios.post('/api/transactions', transactionData)
 
-        // Показать уведомление об успехе
         if (window.showNotification) {
           window.showNotification('success', 'Транзакция успешно добавлена')
         }
@@ -327,10 +338,9 @@ export default {
       } catch (err) {
         console.error('Error creating transaction:', err)
         error.value = err.response?.data?.message ||
-            err.response?.data?.errors?.amount?.[0] ||
+            err.response?.data?.errors?.category_ids?.[0] ||
             'Ошибка при создании транзакции'
 
-        // Прокрутить к ошибке
         window.scrollTo({ top: 0, behavior: 'smooth' })
       } finally {
         loading.value = false
@@ -342,7 +352,7 @@ export default {
     })
 
     watch(() => form.value.type, () => {
-      form.value.category_id = ''
+      form.value.category_ids = []  // ← ИЗМЕНЕНО
     })
 
     return {
@@ -356,6 +366,7 @@ export default {
       budgetWarning,
       isFormValid,
       validateAmount,
+      toggleCategory,  // ← НОВЫЙ МЕТОД
       formatMoney,
       submitTransaction
     }

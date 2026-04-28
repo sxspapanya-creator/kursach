@@ -281,10 +281,10 @@ class CategoryController extends Controller
                 ->withSum(['transactions as current_month_total' => function($query) use ($month, $year) {
                     $query->whereMonth('date', $month)->whereYear('date', $year);
                 }], 'amount')
-                // Дата последней транзакции
+                // Дата последней транзакции (ИСПРАВЛЕНО)
                 ->with(['transactions' => function($query) {
-                    $query->select('category_id', 'date')
-                        ->orderBy('date', 'desc');
+                    $query->select('transactions.id', 'transactions.date')  // убрал category_id
+                    ->orderBy('transactions.date', 'desc');
                 }])
                 ->orderBy('type')
                 ->orderBy('name')

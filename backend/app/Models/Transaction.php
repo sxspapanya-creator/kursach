@@ -1,21 +1,43 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Transaction extends Model
 {
     protected $fillable = [
-        'amount', 'type', 'category_id', 'description', 'date', 'payment_method', 'user_id'
+        'amount',
+        'type',
+        'description',
+        'date',
+        'payment_method',
+        'user_id',
+        'currency_id',  // добавил валюту
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
-        'date' => 'date'
+        'date' => 'date',
     ];
 
-    public function category()
+    // Связь с пользователем
+    public function user(): BelongsTo
     {
-        return $this->belongsTo(Category::class);
+        return $this->belongsTo(User::class);
+    }
+
+    // Связь с валютой
+    public function currency(): BelongsTo
+    {
+        return $this->belongsTo(Currency::class);
+    }
+
+    // Связь "многие ко многим" с категориями
+    public function categories(): BelongsToMany
+    {
+        return $this->belongsToMany(Category::class, 'category_transaction');
     }
 }

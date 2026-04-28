@@ -20,13 +20,13 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 5v14M5 12h14"/>
             </svg>
-            Добавить доходы
+            Добавить доход
           </router-link>
           <router-link to="/transactions/create?type=expense" class="btn btn-danger">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 5v14M5 12h14"/>
             </svg>
-            Добавить расходы
+            Добавить расход
           </router-link>
         </div>
       </div>
@@ -41,16 +41,6 @@
             <option value="">Все типы</option>
             <option value="income">Доходы</option>
             <option value="expense">Расходы</option>
-          </select>
-        </div>
-
-        <div class="filter-group">
-          <label class="filter-label">Категория</label>
-          <select v-model="filters.category_id" @change="fetchTransactions" class="filter-select">
-            <option value="">Все категории</option>
-            <option v-for="category in categories" :value="category.id" :key="category.id">
-              {{ category.name }}
-            </option>
           </select>
         </div>
 
@@ -158,15 +148,23 @@
               @click="editTransaction(transaction)"
           >
             <div class="transaction-content">
+              <!-- Иконка с цветными полосками категорий -->
               <div class="transaction-icon">
-                <div
-                    class="category-icon"
-                    :style="{ backgroundColor: transaction.category.color + '20' }"
-                >
+                <div class="categories-stack" v-if="transaction.categories && transaction.categories.length">
                   <div
-                      class="category-dot"
-                      :style="{ backgroundColor: transaction.category.color }"
+                      v-for="(category, index) in transaction.categories"
+                      :key="category.id"
+                      class="category-piece"
+                      :style="{
+                        backgroundColor: category.color || '#95a5a6',
+                        width: `${100 / transaction.categories.length}%`,
+                        left: `${(index * 100) / transaction.categories.length}%`
+                      }"
+                      :title="category.name"
                   ></div>
+                </div>
+                <div v-else class="categories-stack no-category">
+                  <div class="category-piece" style="background-color: #95a5a6; width: 100%; left: 0;"></div>
                 </div>
               </div>
 
@@ -191,12 +189,27 @@
                     <span>{{ formatDate(transaction.date) }}</span>
                   </div>
 
-                  <div class="meta-item">
+                  <!-- Категории в виде тегов -->
+                  <div class="meta-item categories-list">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
                       <line x1="7" y1="7" x2="7.01" y2="7"/>
                     </svg>
-                    <span>{{ transaction.category.name }}</span>
+                    <div class="categories-tags" v-if="transaction.categories && transaction.categories.length">
+                      <span
+                          v-for="category in transaction.categories"
+                          :key="category.id"
+                          class="category-tag"
+                          :style="{
+                            backgroundColor: (category.color || '#95a5a6') + '20',
+                            color: category.color || '#95a5a6',
+                            borderColor: category.color || '#95a5a6'
+                          }"
+                      >
+                        {{ category.name }}
+                      </span>
+                    </div>
+                    <span v-else class="no-category-text">Без категории</span>
                   </div>
 
                   <div class="meta-item">
@@ -241,27 +254,6 @@
             </div>
           </div>
         </div>
-
-        <!-- Pagination (if needed) -->
-        <div v-if="pagination.total > pagination.perPage" class="pagination">
-          <button
-              @click="prevPage"
-              :disabled="pagination.currentPage === 1"
-              class="pagination-btn"
-          >
-            ← Назад
-          </button>
-          <span class="pagination-info">
-            Страница {{ pagination.currentPage }} из {{ pagination.totalPages }}
-          </span>
-          <button
-              @click="nextPage"
-              :disabled="pagination.currentPage === pagination.totalPages"
-              class="pagination-btn"
-          >
-            Вперед →
-          </button>
-        </div>
       </div>
     </div>
   </div>
@@ -277,32 +269,19 @@ export default {
   setup() {
     const router = useRouter()
     const transactions = ref([])
-    const categories = ref([])
     const loading = ref(true)
 
     const filters = ref({
       type: '',
-      category_id: '',
       month: new Date().toISOString().slice(0, 7)
-    })
-
-    const pagination = ref({
-      currentPage: 1,
-      perPage: 20,
-      total: 0,
-      totalPages: 1
     })
 
     const fetchTransactions = async () => {
       try {
         loading.value = true
-        const params = {
-          page: pagination.value.currentPage,
-          per_page: pagination.value.perPage
-        }
+        const params = {}
 
         if (filters.value.type) params.type = filters.value.type
-        if (filters.value.category_id) params.category_id = filters.value.category_id
         if (filters.value.month) {
           const [year, month] = filters.value.month.split('-')
           params.month = parseInt(month)
@@ -310,54 +289,11 @@ export default {
         }
 
         const response = await axios.get('/api/transactions', { params })
-        transactions.value = response.data.data || response.data || []
-
-        // Update pagination if available
-        if (response.data.meta) {
-          pagination.value = {
-            ...pagination.value,
-            currentPage: response.data.meta.current_page,
-            total: response.data.meta.total,
-            totalPages: response.data.meta.last_page
-          }
-        }
-
-        // Calculate stats for filtered transactions
-        calculateFilteredStats()
+        transactions.value = response.data.data || []
       } catch (error) {
         console.error('Error fetching transactions:', error)
       } finally {
         loading.value = false
-      }
-    }
-
-    const fetchCategories = async () => {
-      try {
-        const response = await axios.get('/api/categories')
-        categories.value = response.data.data || response.data || []
-      } catch (error) {
-        console.error('Error fetching categories:', error)
-      }
-    }
-
-    // УДАЛЕНО: функция fetchStats() - не нужна, так как нет эндпоинтов
-
-    const calculateFilteredStats = () => {
-      let income = 0
-      let expenses = 0
-
-      transactions.value.forEach(transaction => {
-        if (transaction.type === 'income') {
-          income += parseFloat(transaction.amount) || 0
-        } else if (transaction.type === 'expense') {
-          expenses += parseFloat(transaction.amount) || 0
-        }
-      })
-
-      return {
-        income,
-        expenses,
-        balance: income - expenses
       }
     }
 
@@ -366,10 +302,11 @@ export default {
     }
 
     const deleteTransaction = async (id) => {
+      if (!confirm('Вы уверены, что хотите удалить эту транзакцию?')) return
+
       try {
         await axios.delete(`/api/transactions/${id}`)
         await fetchTransactions()
-        // УДАЛЕНО: await fetchStats() - не нужно
       } catch (error) {
         console.error('Error deleting transaction:', error)
         alert('Ошибка при удалении транзакции')
@@ -379,41 +316,21 @@ export default {
     const resetFilters = () => {
       filters.value = {
         type: '',
-        category_id: '',
         month: new Date().toISOString().slice(0, 7)
       }
-      pagination.value.currentPage = 1
       fetchTransactions()
-    }
-
-    const nextPage = () => {
-      if (pagination.value.currentPage < pagination.value.totalPages) {
-        pagination.value.currentPage++
-        fetchTransactions()
-      }
-    }
-
-    const prevPage = () => {
-      if (pagination.value.currentPage > 1) {
-        pagination.value.currentPage--
-        fetchTransactions()
-      }
     }
 
     const formatMoney = (amount) => {
       if (amount === null || amount === undefined || isNaN(amount)) return '0 Br'
-
-      // Форматирование в белорусских рублях
       return new Intl.NumberFormat('ru-RU', {
         minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-        style: 'decimal'
+        maximumFractionDigits: 2
       }).format(amount) + ' Br'
     }
 
     const formatDate = (dateString) => {
       if (!dateString) return 'Дата не указана'
-
       try {
         const date = new Date(dateString)
         return date.toLocaleDateString('ru-RU', {
@@ -421,8 +338,7 @@ export default {
           month: 'short',
           year: 'numeric'
         })
-      } catch (error) {
-        console.error('Error formatting date:', error, dateString)
+      } catch {
         return 'Неверная дата'
       }
     }
@@ -437,7 +353,20 @@ export default {
     }
 
     // Computed properties
-    const filteredStats = computed(() => calculateFilteredStats())
+    const filteredStats = computed(() => {
+      let income = 0
+      let expenses = 0
+
+      transactions.value.forEach(transaction => {
+        if (transaction.type === 'income') {
+          income += parseFloat(transaction.amount) || 0
+        } else if (transaction.type === 'expense') {
+          expenses += parseFloat(transaction.amount) || 0
+        }
+      })
+
+      return { income, expenses, balance: income - expenses }
+    })
 
     const filteredBalanceClass = computed(() => {
       const balance = filteredStats.value.balance
@@ -446,25 +375,20 @@ export default {
       return 'neutral'
     })
 
-    onMounted(async () => {
-      // ИСПРАВЛЕНО: удален ненужный fetchStats()
-      await Promise.all([fetchTransactions(), fetchCategories()])
+    onMounted(() => {
+      fetchTransactions()
     })
 
     return {
       transactions,
-      categories,
       loading,
       filters,
-      pagination,
       filteredStats,
       filteredBalanceClass,
       fetchTransactions,
       editTransaction,
       deleteTransaction,
       resetFilters,
-      nextPage,
-      prevPage,
       formatMoney,
       formatDate,
       getPaymentMethodLabel
@@ -510,7 +434,6 @@ export default {
 .hero-content {
   position: relative;
   z-index: 1;
-  max-width: 800px;
 }
 
 .hero-title {
@@ -530,42 +453,6 @@ export default {
 .hero-subtitle {
   font-size: 1.125rem;
   opacity: 0.9;
-  margin-bottom: 1.5rem;
-  font-weight: 300;
-}
-
-.hero-stats {
-  display: flex;
-  justify-content: center;
-  gap: 2rem;
-  margin-top: 1rem;
-}
-
-.hero-stat {
-  text-align: center;
-}
-
-.hero-stat .stat-value {
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin-bottom: 0.25rem;
-}
-
-.hero-stat .stat-value.positive {
-  color: #4ade80;
-}
-
-.hero-stat .stat-value.negative {
-  color: #f87171;
-}
-
-.hero-stat .stat-value.neutral {
-  color: #e2e8f0;
-}
-
-.hero-stat .stat-label {
-  font-size: 0.875rem;
-  opacity: 0.8;
 }
 
 /* Section Header */
@@ -577,6 +464,8 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
 .section-title {
@@ -589,6 +478,7 @@ export default {
 .header-actions {
   display: flex;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 /* Buttons */
@@ -605,7 +495,6 @@ export default {
   cursor: pointer;
   transition: all 0.2s;
   border: none;
-  white-space: nowrap;
 }
 
 .btn-primary {
@@ -650,11 +539,6 @@ export default {
   font-size: 1rem;
 }
 
-.btn-small {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.8125rem;
-}
-
 /* Filters */
 .filters-section {
   background: white;
@@ -666,16 +550,18 @@ export default {
 }
 
 .filters-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
-  align-items: end;
+  align-items: flex-end;
 }
 
 .filter-group {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  flex: 1;
+  min-width: 150px;
 }
 
 .filter-label {
@@ -691,23 +577,18 @@ export default {
   border-radius: 8px;
   font-size: 0.875rem;
   background: white;
-  color: #1e293b;
   transition: border-color 0.2s;
-  width: 100%;
-  box-sizing: border-box;
 }
 
 .filter-select:focus,
 .filter-input:focus {
   outline: none;
   border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .filter-actions {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 /* Loading and Empty States */
@@ -739,10 +620,8 @@ export default {
 }
 
 .empty-icon {
-  width: 64px;
-  height: 64px;
-  margin-bottom: 1rem;
   color: #94a3b8;
+  margin-bottom: 1rem;
 }
 
 .empty-state h3 {
@@ -755,7 +634,6 @@ export default {
 .empty-state p {
   color: #64748b;
   margin-bottom: 1.5rem;
-  max-width: 400px;
 }
 
 .empty-actions {
@@ -765,7 +643,7 @@ export default {
   justify-content: center;
 }
 
-/* Transactions Summary */
+/* Summary Cards */
 .transactions-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -839,20 +717,14 @@ export default {
   font-weight: 700;
 }
 
-.summary-amount.income {
+.summary-amount.income,
+.summary-amount.positive {
   color: #10b981;
 }
 
-.summary-amount.expense {
-  color: #ef4444;
-}
-
-.summary-amount.positive {
-  color: #16a34a;
-}
-
+.summary-amount.expense,
 .summary-amount.negative {
-  color: #dc2626;
+  color: #ef4444;
 }
 
 .summary-amount.neutral {
@@ -885,30 +757,38 @@ export default {
   display: flex;
   align-items: center;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
+/* Categories Stack (цветные полоски) */
 .transaction-icon {
   flex-shrink: 0;
 }
 
-.category-icon {
+.categories-stack {
+  position: relative;
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  overflow: hidden;
+  background: #f1f5f9;
 }
 
-.category-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
+.category-piece {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  transition: all 0.2s;
 }
 
+.category-piece:hover {
+  opacity: 0.8;
+}
+
+/* Transaction Info */
 .transaction-info {
   flex: 1;
-  min-width: 0;
+  min-width: 180px;
 }
 
 .transaction-header {
@@ -917,6 +797,7 @@ export default {
   align-items: flex-start;
   gap: 1rem;
   margin-bottom: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .transaction-description {
@@ -924,8 +805,6 @@ export default {
   font-weight: 600;
   color: #1e293b;
   margin: 0;
-  line-height: 1.4;
-  word-break: break-word;
 }
 
 .transaction-type {
@@ -946,6 +825,7 @@ export default {
   color: #ef4444;
 }
 
+/* Transaction Meta */
 .transaction-meta {
   display: flex;
   flex-wrap: wrap;
@@ -960,15 +840,41 @@ export default {
   gap: 0.375rem;
 }
 
-.meta-item svg {
-  flex-shrink: 0;
+/* Categories Tags */
+.categories-list {
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
+.categories-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.category-tag {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.no-category-text {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* Transaction Amount */
 .transaction-amount-container {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .transaction-amount {
@@ -990,6 +896,7 @@ export default {
   font-weight: 600;
 }
 
+/* Action Buttons */
 .transaction-actions {
   display: flex;
   gap: 0.5rem;
@@ -1021,54 +928,10 @@ export default {
   color: #ef4444;
 }
 
-/* Pagination */
-.pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 1rem;
-  margin-top: 2rem;
-  padding: 1rem;
-  background: white;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-}
-
-.pagination-btn {
-  padding: 0.5rem 1rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: white;
-  color: #475569;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.pagination-btn:hover:not(:disabled) {
-  background: #f1f5f9;
-  border-color: #94a3b8;
-}
-
-.pagination-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.pagination-info {
-  font-size: 0.875rem;
-  color: #64748b;
-}
-
-/* Responsive Design */
+/* Responsive */
 @media (max-width: 768px) {
   .transactions-page {
     padding: 0 1rem 1.5rem;
-  }
-
-  .hero-section {
-    padding: 1.5rem 1rem;
-    border-radius: 16px;
   }
 
   .hero-title {
@@ -1081,52 +944,34 @@ export default {
     font-size: 2rem;
   }
 
-  .hero-subtitle {
-    font-size: 1rem;
-  }
-
-  .hero-stats {
-    flex-direction: column;
-    gap: 1rem;
-  }
-
   .header-content {
     flex-direction: column;
-    align-items: flex-start;
-    gap: 1rem;
+    align-items: stretch;
   }
 
   .header-actions {
     width: 100%;
-    flex-wrap: wrap;
-    gap: 0.75rem;
   }
 
   .header-actions .btn {
     flex: 1;
-    min-width: 140px;
+    justify-content: center;
   }
 
   .filters-grid {
-    grid-template-columns: 1fr;
-    gap: 1rem;
+    flex-direction: column;
   }
 
   .filter-group {
     width: 100%;
   }
 
-  .transactions-grid {
-    grid-template-columns: 1fr;
-    gap: 1rem;
+  .filter-actions {
+    width: 100%;
   }
 
-  .transaction-card {
-    padding: 1rem;
-  }
-
-  .filters-grid {
-    grid-template-columns: 1fr;
+  .filter-actions button {
+    width: 100%;
   }
 
   .transactions-summary {
@@ -1136,7 +981,6 @@ export default {
   .transaction-content {
     flex-direction: column;
     align-items: flex-start;
-    gap: 1rem;
   }
 
   .transaction-header {
@@ -1155,19 +999,14 @@ export default {
     gap: 0.5rem;
   }
 
-  .pagination {
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .btn {
-    width: 100%;
-    justify-content: center;
-  }
-
   .empty-actions {
     flex-direction: column;
     width: 100%;
+  }
+
+  .empty-actions .btn {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>
