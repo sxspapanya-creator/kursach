@@ -3,20 +3,67 @@
 namespace App\Http\Controllers;
 
 use App\Models\Currency;
+use App\Models\CurrencyRate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
 
 class CurrencyController extends Controller
 {
     public function index(Request $request)
     {
-        $date = $request->query('date', Carbon::today());
-        $currencies = Currency::with(['currencyRates' => function ($query) use ($date) {
-            $query->where('date', $date);
-        }])->get();
-        return response()->json([
-            'status' => 'success',
-            'data' => $currencies
-        ]);
+        try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $date = $request->query('date', Carbon::today()->toDateString());
+
+            // Получаем все валюты
+            $currencies = Currency::all(['id', 'code', 'name', 'symbol', 'is_base']);
+
+            // Получаем базовую валюту BYN
+            $byn = Currency::where('code', 'BYN')->first();
+
+            // Добавляем курс для каждой валюты
+            $currenciesWithRates = $currencies->map(function ($currency) use ($byn, $date) {
+                if ($currency->code === 'BYN') {
+                    $currency->rate = 1;
+                    return $currency;
+                }
+
+                // Получаем курс на указанную дату
+                $rate = CurrencyRate::where('from_currency_id', $currency->id)
+                    ->where('to_currency_id', $byn->id)
+                    ->where('date', $date)
+                    ->first();
+
+                // Если нет курса на эту дату, берем последний доступный
+                if (!$rate) {
+                    $rate = CurrencyRate::where('from_currency_id', $currency->id)
+                        ->where('to_currency_id', $byn->id)
+                        ->orderBy('date', 'desc')
+                        ->first();
+                }
+
+                $currency->rate = $rate ? $rate->rate : null;
+                return $currency;
+            });
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $currenciesWithRates
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to fetch currencies: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }
