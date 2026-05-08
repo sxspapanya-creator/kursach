@@ -125,7 +125,8 @@ class TransactionController extends Controller
                 'category_ids.*' => 'integer|exists:categories,id',
                 'description' => 'nullable|string|max:500',
                 'date' => 'required|date',
-                'payment_method' => 'required|in:cash,card,transfer'
+                'payment_method' => 'required|in:cash,card,transfer',
+                'currency_id' => 'required|exists:currencies,id',
             ]);
 
             // Проверяем, что все категории принадлежат пользователю
@@ -151,7 +152,7 @@ class TransactionController extends Controller
                 'date' => $validated['date'],
                 'payment_method' => $validated['payment_method'],
                 'user_id' => $userId,
-                'currency_id' => 1 // ID базовой валюты, можно сделать динамически
+                'currency_id' => $validated['currency_id'] // ID базовой валюты, можно сделать динамически
             ]);
 
             // Привязываем категории

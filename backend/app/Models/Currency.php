@@ -23,4 +23,9 @@ class Currency extends Model
     {
         return $this->hasMany(Plan::class);
     }
+
+    public function currencyRates(): HasMany
+    {
+        return $this->hasMany(CurrencyRate::class, 'from_currency_id', 'id');
+    }
 }
