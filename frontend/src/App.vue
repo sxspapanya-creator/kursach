@@ -1,10 +1,7 @@
 <template>
   <div id="app">
-    <!-- Навигация показывается только если пользователь авторизован -->
-    <!-- УБИРАЕМ showNav - если авторизован, всегда показываем навигацию -->
     <nav v-if="isAuthenticated" class="navbar">
       <div class="nav-container">
-        <!-- Логотип слева -->
         <div class="nav-left">
           <div class="nav-brand">
             <router-link to="/" class="brand-link">
@@ -13,7 +10,6 @@
           </div>
         </div>
 
-        <!-- Меню по центру -->
         <div class="nav-center">
           <ul class="nav-menu">
             <li>
@@ -56,10 +52,9 @@
           </ul>
         </div>
 
-        <!-- Пользователь справа -->
         <div class="nav-right">
           <div class="nav-user">
-            <div class="user-info">
+            <div class="user-info" @click="goToProfile">
               <div class="user-avatar">
                 {{ userInitials }}
               </div>
@@ -80,13 +75,10 @@
       </div>
     </nav>
 
-    <!-- Основное содержимое -->
-    <!-- УБИРАЕМ класс no-nav - если нет навигации, значит пользователь не авторизован -->
     <main class="main-content">
       <router-view/>
     </main>
 
-    <!-- Уведомления -->
     <div v-if="notification.show" :class="['notification', notification.type]">
       <div class="notification-content">
         <div class="notification-message">{{ notification.message }}</div>
@@ -99,7 +91,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
 export default {
@@ -114,18 +106,16 @@ export default {
       message: ''
     })
 
-    // Реактивное состояние авторизации
     const isAuthenticatedState = ref(false)
+    const refreshTrigger = ref(0)
 
-    // Проверяем авторизацию через API и localStorage
     const isAuthenticated = computed(() => {
-      // Проверяем и localStorage, и состояние из API
       const user = localStorage.getItem('user')
       return isAuthenticatedState.value || !!user
     })
 
-    // Данные пользователя
     const userData = computed(() => {
+      refreshTrigger.value
       try {
         const userStr = localStorage.getItem('user')
         return userStr ? JSON.parse(userStr) : null
@@ -147,7 +137,6 @@ export default {
       return userData.value?.email || ''
     })
 
-    // Уведомления
     const showNotification = (type, message) => {
       notification.value = { show: true, type, message }
       setTimeout(hideNotification, 5000)
@@ -157,10 +146,13 @@ export default {
       notification.value.show = false
     }
 
-    // Выход
+    const goToProfile = () => {
+      router.push('/profile')
+    }
+
+    // Выход из навигации
     const logout = async () => {
       try {
-        // Вызываем endpoint для логаута
         const response = await fetch('/auth/logout', {
           method: 'POST',
           headers: {
@@ -170,38 +162,32 @@ export default {
           credentials: 'include'
         })
 
-        // Очищаем локальные данные независимо от ответа
         localStorage.removeItem('auth_token')
         localStorage.removeItem('user')
-
-        // Обновляем состояние авторизации
         isAuthenticatedState.value = false
+        refreshTrigger.value++
+
+        window.dispatchEvent(new CustomEvent('user-logout'))
 
         if (response.ok) {
           showNotification('success', 'Вы успешно вышли из системы')
         } else {
-          // Даже если запрос не удался, все равно выходим
           showNotification('success', 'Вы вышли из системы')
         }
 
-        // Редирект на логин
         router.push('/login')
       } catch (error) {
         console.error('Ошибка при выходе:', error)
-
-        // Очищаем данные даже при ошибке
         localStorage.removeItem('auth_token')
         localStorage.removeItem('user')
         isAuthenticatedState.value = false
-
+        refreshTrigger.value++
+        window.dispatchEvent(new CustomEvent('user-logout'))
         showNotification('success', 'Вы вышли из системы')
-
-        // Редирект на логин
         router.push('/login')
       }
     }
 
-    // Функция для проверки авторизации через API
     const checkAuthStatus = async () => {
       try {
         const response = await fetch('/auth/user', {
@@ -214,38 +200,52 @@ export default {
 
         if (response.ok) {
           const data = await response.json()
-          console.log('Проверка авторизации в App.vue:', data)
-
           if (data.authenticated && data.user) {
-            // Пользователь авторизован, обновляем состояние и localStorage
             isAuthenticatedState.value = true
             localStorage.setItem('user', JSON.stringify(data.user))
+            refreshTrigger.value++
           } else {
-            // Пользователь не авторизован
             isAuthenticatedState.value = false
             localStorage.removeItem('user')
+            refreshTrigger.value++
           }
         } else {
-          // Если ответ не успешен, считаем неавторизованным
           isAuthenticatedState.value = false
           localStorage.removeItem('user')
+          refreshTrigger.value++
         }
       } catch (error) {
         console.warn('Не удалось проверить авторизацию:', error)
-        // При ошибке проверяем localStorage как fallback
         isAuthenticatedState.value = !!localStorage.getItem('user')
+        refreshTrigger.value++
       }
     }
 
-    // При загрузке проверяем авторизацию
+    const handleUserUpdated = () => {
+      console.log('User updated event received, refreshing user data...')
+      checkAuthStatus()
+    }
+
+    const handleUserLogout = () => {
+      console.log('User logout event received')
+      isAuthenticatedState.value = false
+      localStorage.removeItem('user')
+      refreshTrigger.value++
+    }
+
     onMounted(async () => {
       console.log('App mounted, проверка авторизации...')
       await checkAuthStatus()
+      window.addEventListener('user-updated', handleUserUpdated)
+      window.addEventListener('user-logout', handleUserLogout)
     })
 
-    // Проверяем авторизацию при изменении маршрута (особенно после логина)
+    onUnmounted(() => {
+      window.removeEventListener('user-updated', handleUserUpdated)
+      window.removeEventListener('user-logout', handleUserLogout)
+    })
+
     watch(() => route.path, async (newPath) => {
-      // Проверяем авторизацию при переходе на защищенные маршруты
       if (newPath !== '/login' && newPath !== '/register') {
         await checkAuthStatus()
       }
@@ -260,7 +260,8 @@ export default {
       logout,
       showNotification,
       hideNotification,
-      checkAuthStatus
+      checkAuthStatus,
+      goToProfile
     }
   }
 }

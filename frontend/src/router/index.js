@@ -8,6 +8,7 @@ import Analytics from '../views/Analytics.vue'
 import Login from '../views/Login.vue'
 import Register from '../views/Register.vue'
 import MassDeleteTransactions from '../views/MassDeleteTransactions.vue'
+import Profile from '../views/Profile.vue'
 
 const routes = [
     {
@@ -81,6 +82,15 @@ const routes = [
         meta: {
             requiresAuth: true,
             title: 'Аналитика'
+        }
+    },
+    {
+        path: '/profile',
+        name: 'Profile',
+        component: Profile,
+        meta: {
+            requiresAuth: true,
+            title: 'Личный кабинет'
         }
     },
     {
