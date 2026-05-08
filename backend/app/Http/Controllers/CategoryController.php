@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Category;
 use App\Models\Transaction;
+use App\Models\Currency;
+use App\Models\CurrencyRate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
@@ -67,11 +69,10 @@ class CategoryController extends Controller
                 ],
             ]);
 
-            // Проверяем уникальность имени для текущего пользователя
             $existingCategory = Category::where('user_id', $userId)
                 ->where('name', $validated['name'])
                 ->first();
-            
+
             if ($existingCategory) {
                 return response()->json([
                     'status' => 'error',
@@ -172,13 +173,12 @@ class CategoryController extends Controller
                 ],
             ]);
 
-            // Проверяем уникальность имени для текущего пользователя (исключая текущую категорию)
             if (isset($validated['name'])) {
                 $existingCategory = Category::where('user_id', $userId)
                     ->where('name', $validated['name'])
                     ->where('id', '!=', $id)
                     ->first();
-                
+
                 if ($existingCategory) {
                     return response()->json([
                         'status' => 'error',
@@ -251,6 +251,9 @@ class CategoryController extends Controller
         }
     }
 
+    /**
+     * Получить категории с транзакциями и разбивкой по валютам (только 5 валют)
+     */
     public function withTransactions(Request $request)
     {
         try {
@@ -270,56 +273,126 @@ class CategoryController extends Controller
             $month = $validated['month'] ?? now()->month;
             $year = $validated['year'] ?? now()->year;
 
+            // Получаем базовую валюту BYN
+            $byn = Currency::where('code', 'BYN')->first();
+
+            // Получаем все категории
             $categories = Category::where('user_id', $userId)
-                // Общая статистика
-                ->withCount(['transactions as transaction_count'])
-                ->withSum(['transactions as total_amount'], 'amount')
-                // Статистика за текущий месяц
-                ->withCount(['transactions as current_month_count' => function($query) use ($month, $year) {
-                    $query->whereMonth('date', $month)->whereYear('date', $year);
-                }])
-                ->withSum(['transactions as current_month_total' => function($query) use ($month, $year) {
-                    $query->whereMonth('date', $month)->whereYear('date', $year);
-                }], 'amount')
-                // Дата последней транзакции (ИСПРАВЛЕНО)
-                ->with(['transactions' => function($query) {
-                    $query->select('transactions.id', 'transactions.date')  // убрал category_id
-                    ->orderBy('transactions.date', 'desc');
-                }])
                 ->orderBy('type')
                 ->orderBy('name')
-                ->get()
-                ->map(function ($category) {
-                    $lastTransaction = $category->transactions->first();
+                ->get();
 
-                    return [
-                        'id' => $category->id,
-                        'name' => $category->name,
-                        'type' => $category->type,
-                        'color' => $category->color,
-                        'budget_limit' => $category->budget_limit,
-                        'transaction_count' => $category->transaction_count,
-                        'total_amount' => $category->total_amount,
-                        'current_month_count' => $category->current_month_count,
-                        'current_month_total' => $category->current_month_total,
-                        'last_transaction_date' => $lastTransaction->date ?? null,
-                        'updated_at' => $category->updated_at->format('Y-m-d H:i:s')
-                    ];
-                });
+            $result = [];
+
+            foreach ($categories as $category) {
+                // Получаем транзакции категории за указанный месяц с валютой
+                $transactions = Transaction::where('user_id', $userId)
+                    ->whereHas('categories', function($q) use ($category) {
+                        $q->where('category_id', $category->id);
+                    })
+                    ->whereMonth('date', $month)
+                    ->whereYear('date', $year)
+                    ->with('currency')
+                    ->get();
+
+                $totalAmountByn = 0;
+                $transactionCount = $transactions->count();
+
+                // Статистика по 5 валютам
+                $currencyStats = [
+                    'BYN' => ['currency_code' => 'BYN', 'currency_symbol' => 'Br', 'total_amount' => 0, 'transaction_count' => 0],
+                    'RUB' => ['currency_code' => 'RUB', 'currency_symbol' => '₽', 'total_amount' => 0, 'transaction_count' => 0],
+                    'USD' => ['currency_code' => 'USD', 'currency_symbol' => '$', 'total_amount' => 0, 'transaction_count' => 0],
+                    'EUR' => ['currency_code' => 'EUR', 'currency_symbol' => '€', 'total_amount' => 0, 'transaction_count' => 0],
+                    'CNY' => ['currency_code' => 'CNY', 'currency_symbol' => '¥', 'total_amount' => 0, 'transaction_count' => 0],
+                ];
+
+                foreach ($transactions as $transaction) {
+                    $amount = $transaction->amount;
+                    $currency = $transaction->currency;
+                    $currencyCode = $currency ? $currency->code : 'BYN';
+                    $currencyId = $transaction->currency_id;
+                    $date = $transaction->date;
+
+                    // Конвертируем в BYN
+                    $rate = 1;
+                    if ($currencyCode !== 'BYN' && $byn) {
+                        $rateRecord = CurrencyRate::where('from_currency_id', $currencyId)
+                            ->where('to_currency_id', $byn->id)
+                            ->where('date', $date)
+                            ->first();
+
+                        if (!$rateRecord) {
+                            $rateRecord = CurrencyRate::where('from_currency_id', $currencyId)
+                                ->where('to_currency_id', $byn->id)
+                                ->where('date', '<=', $date)
+                                ->orderBy('date', 'desc')
+                                ->first();
+                        }
+
+                        $rate = $rateRecord ? $rateRecord->rate : 1;
+                    }
+
+                    $totalAmountByn += $amount * $rate;
+
+                    // Обновляем статистику по валюте
+                    if (isset($currencyStats[$currencyCode])) {
+                        $currencyStats[$currencyCode]['total_amount'] += $amount;
+                        $currencyStats[$currencyCode]['transaction_count']++;
+                    }
+                }
+
+                // Удаляем валюты с нулевыми показателями
+                $filteredCurrencyStats = array_values(array_filter($currencyStats, function($stat) {
+                    return $stat['transaction_count'] > 0;
+                }));
+
+                // Получаем последнюю транзакцию
+                $lastTransaction = Transaction::where('user_id', $userId)
+                    ->whereHas('categories', function($q) use ($category) {
+                        $q->where('category_id', $category->id);
+                    })
+                    ->orderBy('date', 'desc')
+                    ->first();
+
+                // Получаем общее количество транзакций за все время
+                $allTimeCount = Transaction::where('user_id', $userId)
+                    ->whereHas('categories', function($q) use ($category) {
+                        $q->where('category_id', $category->id);
+                    })
+                    ->count();
+
+                $result[] = [
+                    'id' => $category->id,
+                    'name' => $category->name,
+                    'type' => $category->type,
+                    'color' => $category->color,
+                    'budget_limit' => $category->budget_limit,
+                    'transaction_count' => $transactionCount,
+                    'total_amount_byn' => round($totalAmountByn, 2),
+                    'currency_stats' => $filteredCurrencyStats,
+                    'last_transaction_date' => $lastTransaction ? $lastTransaction->date : null,
+                    'all_time_count' => $allTimeCount,
+                    'updated_at' => $category->updated_at->format('Y-m-d H:i:s')
+                ];
+            }
 
             return response()->json([
                 'status' => 'success',
-                'data' => $categories
+                'data' => $result
             ]);
+
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to fetch categories with transactions',
-                'error' => $e->getMessage()
+                'message' => 'Failed to fetch categories with transactions: ' . $e->getMessage()
             ], 500);
         }
     }
 
+    /**
+     * Получить категории со статистикой по валютам (только 5 валют)
+     */
     public function withStats(Request $request)
     {
         try {
@@ -339,56 +412,153 @@ class CategoryController extends Controller
             $month = $validated['month'] ?? now()->month;
             $year = $validated['year'] ?? now()->year;
 
+            // Получаем базовую валюту BYN
+            $byn = Currency::where('code', 'BYN')->first();
+
+            // Получаем все категории
             $categories = Category::where('user_id', $userId)
-                // Общее количество транзакций
-                ->withCount(['transactions as transaction_count'])
-                // Сумма всех транзакций
-                ->withSum(['transactions as total_amount'], 'amount')
-                // Количество транзакций за текущий месяц
-                ->withCount(['transactions as current_month_count' => function($query) use ($month, $year) {
-                    $query->whereMonth('date', $month)
-                        ->whereYear('date', $year);
-                }])
-                // Сумма транзакций за текущий месяц
-                ->withSum(['transactions as current_month_total' => function($query) use ($month, $year) {
-                    $query->whereMonth('date', $month)
-                        ->whereYear('date', $year);
-                }], 'amount')
-                // Дата последней транзакции
-                ->with(['transactions' => function($query) {
-                    $query->orderBy('date', 'desc')->limit(1);
-                }])
                 ->orderBy('type')
                 ->orderBy('name')
-                ->get()
-                ->map(function ($category) {
-                    return [
-                        'id' => $category->id,
-                        'name' => $category->name,
-                        'type' => $category->type,
-                        'color' => $category->color,
-                        'budget_limit' => $category->budget_limit,
-                        'transaction_count' => $category->transaction_count,
-                        'total_amount' => abs($category->total_amount ?? 0),
-                        'current_month_count' => $category->current_month_count,
-                        'current_month_total' => abs($category->current_month_total ?? 0),
-                        'last_transaction_date' => $category->transactions->first()->date ?? null,
-                        'created_at' => $category->created_at,
-                        'updated_at' => $category->updated_at,
-                    ];
-                });
+                ->get();
+
+            $result = [];
+
+            foreach ($categories as $category) {
+                // Получаем транзакции за указанный месяц
+                $monthTransactions = Transaction::where('user_id', $userId)
+                    ->whereHas('categories', function($q) use ($category) {
+                        $q->where('category_id', $category->id);
+                    })
+                    ->whereMonth('date', $month)
+                    ->whereYear('date', $year)
+                    ->with('currency')
+                    ->get();
+
+                // Получаем все транзакции за все время
+                $allTransactions = Transaction::where('user_id', $userId)
+                    ->whereHas('categories', function($q) use ($category) {
+                        $q->where('category_id', $category->id);
+                    })
+                    ->with('currency')
+                    ->get();
+
+                $monthTotalByn = 0;
+                $monthCount = $monthTransactions->count();
+                $allTimeTotalByn = 0;
+                $allTimeCount = $allTransactions->count();
+
+                // Статистика по 5 валютам за месяц
+                $monthCurrencyStats = [
+                    'BYN' => ['currency_code' => 'BYN', 'currency_symbol' => 'Br', 'total_amount' => 0, 'transaction_count' => 0],
+                    'RUB' => ['currency_code' => 'RUB', 'currency_symbol' => '₽', 'total_amount' => 0, 'transaction_count' => 0],
+                    'USD' => ['currency_code' => 'USD', 'currency_symbol' => '$', 'total_amount' => 0, 'transaction_count' => 0],
+                    'EUR' => ['currency_code' => 'EUR', 'currency_symbol' => '€', 'total_amount' => 0, 'transaction_count' => 0],
+                    'CNY' => ['currency_code' => 'CNY', 'currency_symbol' => '¥', 'total_amount' => 0, 'transaction_count' => 0],
+                ];
+
+                // Обработка транзакций за месяц
+                foreach ($monthTransactions as $transaction) {
+                    $amount = $transaction->amount;
+                    $currency = $transaction->currency;
+                    $currencyCode = $currency ? $currency->code : 'BYN';
+                    $currencyId = $transaction->currency_id;
+                    $date = $transaction->date;
+
+                    $rate = 1;
+                    if ($currencyCode !== 'BYN' && $byn) {
+                        $rateRecord = CurrencyRate::where('from_currency_id', $currencyId)
+                            ->where('to_currency_id', $byn->id)
+                            ->where('date', $date)
+                            ->first();
+
+                        if (!$rateRecord) {
+                            $rateRecord = CurrencyRate::where('from_currency_id', $currencyId)
+                                ->where('to_currency_id', $byn->id)
+                                ->where('date', '<=', $date)
+                                ->orderBy('date', 'desc')
+                                ->first();
+                        }
+
+                        $rate = $rateRecord ? $rateRecord->rate : 1;
+                    }
+
+                    $monthTotalByn += $amount * $rate;
+
+                    if (isset($monthCurrencyStats[$currencyCode])) {
+                        $monthCurrencyStats[$currencyCode]['total_amount'] += $amount;
+                        $monthCurrencyStats[$currencyCode]['transaction_count']++;
+                    }
+                }
+
+                // Обработка всех транзакций (для all_time_total_byn)
+                foreach ($allTransactions as $transaction) {
+                    $amount = $transaction->amount;
+                    $currency = $transaction->currency;
+                    $currencyCode = $currency ? $currency->code : 'BYN';
+                    $currencyId = $transaction->currency_id;
+                    $date = $transaction->date;
+
+                    $rate = 1;
+                    if ($currencyCode !== 'BYN' && $byn) {
+                        $rateRecord = CurrencyRate::where('from_currency_id', $currencyId)
+                            ->where('to_currency_id', $byn->id)
+                            ->where('date', $date)
+                            ->first();
+
+                        if (!$rateRecord) {
+                            $rateRecord = CurrencyRate::where('from_currency_id', $currencyId)
+                                ->where('to_currency_id', $byn->id)
+                                ->where('date', '<=', $date)
+                                ->orderBy('date', 'desc')
+                                ->first();
+                        }
+
+                        $rate = $rateRecord ? $rateRecord->rate : 1;
+                    }
+
+                    $allTimeTotalByn += $amount * $rate;
+                }
+
+                // Удаляем валюты с нулевыми показателями
+                $filteredMonthCurrencyStats = array_values(array_filter($monthCurrencyStats, function($stat) {
+                    return $stat['transaction_count'] > 0;
+                }));
+
+                // Получаем последнюю транзакцию
+                $lastTransaction = Transaction::where('user_id', $userId)
+                    ->whereHas('categories', function($q) use ($category) {
+                        $q->where('category_id', $category->id);
+                    })
+                    ->orderBy('date', 'desc')
+                    ->first();
+
+                $result[] = [
+                    'id' => $category->id,
+                    'name' => $category->name,
+                    'type' => $category->type,
+                    'color' => $category->color,
+                    'budget_limit' => $category->budget_limit,
+                    'transaction_count' => $monthCount,
+                    'total_amount' => round($monthTotalByn, 2),
+                    'currency_stats' => $filteredMonthCurrencyStats,
+                    'all_time_count' => $allTimeCount,
+                    'all_time_total_byn' => round($allTimeTotalByn, 2),
+                    'last_transaction_date' => $lastTransaction ? $lastTransaction->date : null,
+                    'created_at' => $category->created_at,
+                    'updated_at' => $category->updated_at,
+                ];
+            }
 
             return response()->json([
                 'status' => 'success',
-                'data' => $categories
+                'data' => $result
             ]);
+
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to fetch categories with stats',
-                'error' => $e->getMessage()
+                'message' => 'Failed to fetch categories with stats: ' . $e->getMessage()
             ], 500);
         }
     }
-
 }

@@ -7,6 +7,7 @@ import Categories from '../views/Categories.vue'
 import Analytics from '../views/Analytics.vue'
 import Login from '../views/Login.vue'
 import Register from '../views/Register.vue'
+import MassDeleteTransactions from '../views/MassDeleteTransactions.vue'
 
 const routes = [
     {
@@ -61,7 +62,7 @@ const routes = [
         props: true,
         meta: {
             requiresAuth: true,
-            title: 'Редактировать транзакцию'
+            title: 'Изменить транзакцию'
         }
     },
     {
@@ -85,6 +86,15 @@ const routes = [
     {
         path: '/:pathMatch(.*)*',
         redirect: '/'
+    },
+    {
+        path: '/transactions/mass-delete',
+        name: 'MassDeleteTransactions',
+        component: MassDeleteTransactions,
+        meta: {
+            requiresAuth: true,
+            title: 'Массовое удаление транзакций'
+        }
     }
 ]
 

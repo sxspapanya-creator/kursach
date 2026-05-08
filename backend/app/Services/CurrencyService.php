@@ -260,7 +260,7 @@ class CurrencyService
 
             if ($currency) {
                 $newRate = $apiRate['Cur_OfficialRate'] / $apiRate['Cur_Scale'];
-                $newRate = round($newRate, 6);
+                //$newRate = round($newRate, 6);
 
                 CurrencyRate::updateOrCreate(
                     [

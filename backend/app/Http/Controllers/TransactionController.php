@@ -444,4 +444,67 @@ class TransactionController extends Controller
             ], 500);
         }
     }
+
+    public function massDelete(Request $request)
+    {
+        try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $validated = $request->validate([
+                'transaction_ids' => 'required|array',
+                'transaction_ids.*' => 'integer|exists:transactions,id'
+            ]);
+
+            $transactionIds = $validated['transaction_ids'];
+
+            // Проверяем, что все транзакции принадлежат пользователю
+            $count = Transaction::where('user_id', $userId)
+                ->whereIn('id', $transactionIds)
+                ->count();
+
+            if ($count !== count($transactionIds)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Some transactions do not belong to you'
+                ], 403);
+            }
+
+            // Удаляем связи с категориями
+            foreach ($transactionIds as $id) {
+                $transaction = Transaction::find($id);
+                if ($transaction) {
+                    $transaction->categories()->detach();
+                }
+            }
+
+            // Удаляем транзакции
+            $deleted = Transaction::where('user_id', $userId)
+                ->whereIn('id', $transactionIds)
+                ->delete();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Deleted {$deleted} transactions",
+                'data' => ['deleted_count' => $deleted]
+            ]);
+
+        } catch (ValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to delete transactions: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }

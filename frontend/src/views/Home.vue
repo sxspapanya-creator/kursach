@@ -10,15 +10,15 @@
         <p class="hero-subtitle">Контролируйте доходы и расходы с умом</p>
         <div class="hero-stats">
           <div class="hero-stat">
-            <div class="stat-value">{{ formatMoney(stats.monthlyIncome) }}</div>
+            <div class="stat-value">{{ formatMoneyWithCurrency(stats.monthlyIncome, 'BYN') }}</div>
             <div class="stat-label">Доходы за месяц</div>
           </div>
           <div class="hero-stat">
-            <div class="stat-value">{{ formatMoney(stats.monthlyExpenses) }}</div>
+            <div class="stat-value">{{ formatMoneyWithCurrency(stats.monthlyExpenses, 'BYN') }}</div>
             <div class="stat-label">Расходы за месяц</div>
           </div>
           <div class="hero-stat">
-            <div class="stat-value" :class="balanceClass">{{ formatMoney(stats.monthlyBalance) }}</div>
+            <div class="stat-value" :class="balanceClass">{{ formatMoneyWithCurrency(stats.monthlyBalance, 'BYN') }}</div>
             <div class="stat-label">Баланс месяца</div>
           </div>
         </div>
@@ -33,7 +33,7 @@
           <div class="period-stat-header">
             <h3 class="period-stat-month">{{ formatMonth(monthStat.month || monthStat.period) }}</h3>
             <div class="period-stat-total" :class="getBalanceClass(monthStat.balance)">
-              {{ formatMoney(monthStat.balance) }}
+              {{ formatMoneyWithCurrency(monthStat.balance, 'BYN') }}
             </div>
           </div>
 
@@ -43,7 +43,7 @@
                 <div class="period-stat-dot income"></div>
                 Доходы
               </div>
-              <div class="period-stat-amount">{{ formatMoney(monthStat.income) }}</div>
+              <div class="period-stat-amount">{{ formatMoneyWithCurrency(monthStat.income, 'BYN') }}</div>
             </div>
 
             <div class="period-stat-item expense">
@@ -51,7 +51,7 @@
                 <div class="period-stat-dot expense"></div>
                 Расходы
               </div>
-              <div class="period-stat-amount">{{ formatMoney(monthStat.expenses || monthStat.expense || 0) }}</div>
+              <div class="period-stat-amount">{{ formatMoneyWithCurrency(monthStat.expenses || monthStat.expense || 0, 'BYN') }}</div>
             </div>
           </div>
 
@@ -83,7 +83,7 @@
         </div>
         <div class="stat-card-content">
           <h3 class="stat-title">Все доходы</h3>
-          <div class="stat-amount">{{ formatMoney(stats.totalIncome) }}</div>
+          <div class="stat-amount">{{ formatMoneyWithCurrency(stats.totalIncome, 'BYN') }}</div>
           <div class="stat-period">за все время</div>
         </div>
       </div>
@@ -100,7 +100,7 @@
         </div>
         <div class="stat-card-content">
           <h3 class="stat-title">Все расходы</h3>
-          <div class="stat-amount">{{ formatMoney(stats.totalExpenses) }}</div>
+          <div class="stat-amount">{{ formatMoneyWithCurrency(stats.totalExpenses, 'BYN') }}</div>
           <div class="stat-period">за все время</div>
         </div>
       </div>
@@ -118,7 +118,7 @@
         </div>
         <div class="stat-card-content">
           <h3 class="stat-title">Общий баланс</h3>
-          <div class="stat-amount">{{ formatMoney(totalBalance) }}</div>
+          <div class="stat-amount">{{ formatMoneyWithCurrency(totalBalance, 'BYN') }}</div>
           <div class="stat-period">за все время</div>
         </div>
       </div>
@@ -281,7 +281,11 @@
           <div class="transaction-amount-container">
             <div class="transaction-amount" :class="transaction.type">
               <span class="amount-sign">{{ transaction.type === 'income' ? '+' : '-' }}</span>
-              {{ formatMoney(transaction.amount) }}
+              {{ formatTransactionMoney(transaction) }}
+            </div>
+            <!-- Показываем курс если валюта не BYN -->
+            <div v-if="transaction.currency && transaction.currency.code !== 'BYN' && transaction.exchange_rate" class="transaction-rate">
+              1 {{ transaction.currency.code }} = {{ formatMoneyAmount(transaction.exchange_rate) }} Br
             </div>
           </div>
         </div>
@@ -312,12 +316,55 @@ export default {
     const loading = ref(true)
     const error = ref(null)
 
+    // Символы валют для 5 основных валют
+    const getCurrencySymbol = (currencyCode) => {
+      const symbols = {
+        'BYN': 'Br',
+        'RUB': '₽',
+        'USD': '$',
+        'EUR': '€',
+        'CNY': '¥'
+      }
+      return symbols[currencyCode] || 'Br'
+    }
+
+    // Форматирование суммы с указанной валютой
+    const formatMoneyWithCurrency = (amount, currencyCode = 'BYN') => {
+      if (amount === null || amount === undefined || isNaN(amount)) return `0 ${getCurrencySymbol(currencyCode)}`
+      const symbol = getCurrencySymbol(currencyCode)
+      return new Intl.NumberFormat('ru-RU', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(amount) + ' ' + symbol
+    }
+
+    // Форматирование суммы без валюты (только число)
+    const formatMoneyAmount = (amount) => {
+      if (amount === null || amount === undefined || isNaN(amount)) return '0'
+      return new Intl.NumberFormat('ru-RU', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(amount)
+    }
+
+    // Форматирование суммы транзакции с валютой
+    const formatTransactionMoney = (transaction) => {
+      if (!transaction) return '0 Br'
+      const amount = transaction.amount || 0
+      const currencyCode = transaction.currency?.code || 'BYN'
+      const currencySymbol = getCurrencySymbol(currencyCode)
+
+      return new Intl.NumberFormat('ru-RU', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(amount) + ' ' + currencySymbol
+    }
+
     // Получаем последние 3 месяца из трендов
     const last3Months = computed(() => {
       if (!monthlyTrends.value || monthlyTrends.value.length === 0) return []
 
       const lastThree = monthlyTrends.value.slice(-3).map(month => {
-        // API возвращает 'expense', но мы используем 'expenses' в шаблоне
         const expenses = month.expenses || month.expense || 0
         const income = month.income || 0
         const total = income + expenses
@@ -327,7 +374,7 @@ export default {
         return {
           ...month,
           income,
-          expenses, // Нормализуем к expenses
+          expenses,
           balance: month.balance || (income - expenses),
           incomePercentage,
           expensesPercentage
@@ -337,7 +384,6 @@ export default {
       return lastThree
     })
 
-    // Компьютед свойства
     const totalBalance = computed(() => {
       return stats.value.totalIncome - stats.value.totalExpenses
     })
@@ -363,121 +409,50 @@ export default {
 
         console.log('Загрузка данных дашборда...')
 
-        // Используем fetch с credentials для работы с сессиями
         const headers = {
           'Accept': 'application/json',
           'X-Requested-With': 'XMLHttpRequest'
         }
 
-        // 1. Статистика за текущий месяц
         const summaryUrl = '/api/transactions/summary'
-        const summaryResponse = await fetch(summaryUrl, {
-          headers,
-          credentials: 'include'
-        })
+        const summaryResponse = await fetch(summaryUrl, { headers, credentials: 'include' })
 
-        // 2. Последние транзакции
         const recentUrl = '/api/transactions/recent?limit=6'
-        const recentResponse = await fetch(recentUrl, {
-          headers,
-          credentials: 'include'
-        })
+        const recentResponse = await fetch(recentUrl, { headers, credentials: 'include' })
 
-        // 3. Тренды по месяцам
         const trendsUrl = '/api/analytics/monthly-trends?months=12'
-        const trendsResponse = await fetch(trendsUrl, {
-          headers,
-          credentials: 'include'
-        })
+        const trendsResponse = await fetch(trendsUrl, { headers, credentials: 'include' })
 
-        // 4. Все транзакции для расчета общей статистики
         const allTransactionsUrl = '/api/transactions?limit=1000'
-        const allTransactionsResponse = await fetch(allTransactionsUrl, {
-          headers,
-          credentials: 'include'
-        })
+        const allTransactionsResponse = await fetch(allTransactionsUrl, { headers, credentials: 'include' })
 
-        // Проверяем статусы ответов перед парсингом
-        if (summaryResponse.status === 401 || recentResponse.status === 401 || 
+        if (summaryResponse.status === 401 || recentResponse.status === 401 ||
             trendsResponse.status === 401 || allTransactionsResponse.status === 401) {
           throw new Error('Unauthorized')
         }
 
-        if (!summaryResponse.ok || !recentResponse.ok || !trendsResponse.ok || !allTransactionsResponse.ok) {
-          console.error('Ошибки ответов:', {
-            summary: { status: summaryResponse.status, ok: summaryResponse.ok },
-            recent: { status: recentResponse.status, ok: recentResponse.ok },
-            trends: { status: trendsResponse.status, ok: trendsResponse.ok },
-            allTransactions: { status: allTransactionsResponse.status, ok: allTransactionsResponse.ok }
-          })
-        }
-
-        // Парсим JSON ответы
         const [summaryData, recentData, trendsData, allTransactionsData] = await Promise.all([
-          summaryResponse.json().catch((e) => {
-            console.error('Ошибка парсинга summary:', e)
-            return { status: 'error', data: null }
-          }),
-          recentResponse.json().catch((e) => {
-            console.error('Ошибка парсинга recent:', e)
-            return { status: 'error', data: [] }
-          }),
-          trendsResponse.json().catch((e) => {
-            console.error('Ошибка парсинга trends:', e)
-            return { status: 'error', data: [] }
-          }),
-          allTransactionsResponse.json().catch((e) => {
-            console.error('Ошибка парсинга allTransactions:', e)
-            return { status: 'error', data: [] }
-          })
+          summaryResponse.json().catch(e => ({ status: 'error', data: null })),
+          recentResponse.json().catch(e => ({ status: 'error', data: [] })),
+          trendsResponse.json().catch(e => ({ status: 'error', data: [] })),
+          allTransactionsResponse.json().catch(e => ({ status: 'error', data: [] }))
         ])
 
-        console.log('Ответы от сервера (RAW):', {
-          summary: summaryData,
-          recent: recentData,
-          trends: trendsData,
-          allTransactions: allTransactionsData
-        })
-
-        // Обрабатываем статистику за месяц
         if (summaryData.status === 'success' && summaryData.data) {
           const monthlyStats = summaryData.data
           stats.value.monthlyIncome = parseFloat(monthlyStats.income) || 0
           stats.value.monthlyExpenses = parseFloat(monthlyStats.expenses) || 0
           stats.value.monthlyBalance = parseFloat(monthlyStats.balance) || 0
-          console.log('Статистика за месяц установлена:', {
-            income: stats.value.monthlyIncome,
-            expenses: stats.value.monthlyExpenses,
-            balance: stats.value.monthlyBalance
-          })
-        } else {
-          console.warn('Не удалось получить статистику за месяц:', summaryData)
         }
 
-        // Обрабатываем тренды по месяцам
-        if (trendsData.status === 'success' && trendsData.data) {
-          const trendsResult = trendsData.data
-          if (Array.isArray(trendsResult)) {
-            monthlyTrends.value = trendsResult
-            console.log('Тренды установлены:', trendsResult.length, 'месяцев')
-          } else {
-            console.warn('Тренды не являются массивом:', trendsResult)
-          }
-        } else {
-          console.warn('Не удалось получить тренды:', trendsData)
+        if (trendsData.status === 'success' && trendsData.data && Array.isArray(trendsData.data)) {
+          monthlyTrends.value = trendsData.data
         }
 
-        // Рассчитываем общую статистику из всех транзакций
         let allTransactions = []
         if (allTransactionsData.status === 'success' && allTransactionsData.data) {
-          allTransactions = Array.isArray(allTransactionsData.data) 
-            ? allTransactionsData.data 
-            : []
-        } else {
-          console.warn('Не удалось получить все транзакции:', allTransactionsData)
+          allTransactions = Array.isArray(allTransactionsData.data) ? allTransactionsData.data : []
         }
-
-        console.log('Всего транзакций получено:', allTransactions.length)
 
         let totalIncome = 0
         let totalExpenses = 0
@@ -494,67 +469,34 @@ export default {
         stats.value.totalIncome = totalIncome
         stats.value.totalExpenses = totalExpenses
 
-        console.log('Общая статистика рассчитана:', {
-          totalIncome,
-          totalExpenses,
-          totalBalance: totalIncome - totalExpenses,
-          transactionsCount: allTransactions.length
-        })
-
-        // Обрабатываем последние транзакции
         let recentTransactionsData = []
         if (recentData.status === 'success' && recentData.data) {
-          recentTransactionsData = Array.isArray(recentData.data) 
-            ? recentData.data 
-            : []
-        } else {
-          console.warn('Не удалось получить последние транзакции:', recentData)
+          recentTransactionsData = Array.isArray(recentData.data) ? recentData.data : []
         }
 
-        recentTransactions.value = recentTransactionsData.map(t => {
-          let categories = []
-          if (t.categories && Array.isArray(t.categories) && t.categories.length > 0) {
-            categories = t.categories.map(cat => ({
-              id: cat.id,
-              name: cat.name,
-              color: cat.color
-            }))
-          }
-          return {
-            id: t.id,
-            amount: t.amount,
-            type: t.type,
-            description: t.description,
-            date: t.date,
-            categories: categories
-          }
-        })
-
-        console.log('Последние транзакции обработаны:', recentTransactions.value.length)
-        
-        // Финальная проверка данных
-        console.log('Финальное состояние stats:', {
-          monthlyIncome: stats.value.monthlyIncome,
-          monthlyExpenses: stats.value.monthlyExpenses,
-          monthlyBalance: stats.value.monthlyBalance,
-          totalIncome: stats.value.totalIncome,
-          totalExpenses: stats.value.totalExpenses,
-          monthlyTrendsCount: monthlyTrends.value.length,
-          recentTransactionsCount: recentTransactions.value.length
-        })
+        recentTransactions.value = recentTransactionsData.map(t => ({
+          id: t.id,
+          amount: t.amount,
+          type: t.type,
+          description: t.description,
+          date: t.date,
+          currency: t.currency,
+          exchange_rate: t.exchange_rate,
+          categories: (t.categories && Array.isArray(t.categories)) ? t.categories.map(cat => ({
+            id: cat.id,
+            name: cat.name,
+            color: cat.color
+          })) : []
+        }))
 
       } catch (err) {
         console.error('Error fetching dashboard data:', err)
-
-        // Если ошибка 401 - пользователь не авторизован
         if (err.message && (err.message.includes('401') || err.message.includes('Unauthorized'))) {
-          console.log('Пользователь не авторизован')
           error.value = 'Требуется авторизация'
         } else {
           error.value = 'Ошибка загрузки данных: ' + (err.message || 'Неизвестная ошибка')
         }
 
-        // Очищаем данные при ошибке
         stats.value = {
           totalIncome: 0,
           totalExpenses: 0,
@@ -562,10 +504,8 @@ export default {
           monthlyExpenses: 0,
           monthlyBalance: 0
         }
-
         monthlyTrends.value = []
         recentTransactions.value = []
-
       } finally {
         loading.value = false
       }
@@ -577,53 +517,31 @@ export default {
       return 'neutral'
     }
 
-    const formatMoney = (amount) => {
-      if (amount === null || amount === undefined || isNaN(amount)) return '0 Br'
-
-      return new Intl.NumberFormat('ru-RU', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-        style: 'decimal'
-      }).format(amount) + ' Br'
-    }
-
     const formatDate = (dateString) => {
       if (!dateString) return 'Дата не указана'
-
       try {
         const date = new Date(dateString)
         const now = new Date()
         const diffTime = Math.abs(now - date)
         const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
 
-        // Если сегодня
         if (date.toDateString() === now.toDateString()) {
           return 'Сегодня'
         }
-
-        // Если вчера
         const yesterday = new Date(now)
         yesterday.setDate(yesterday.getDate() - 1)
         if (date.toDateString() === yesterday.toDateString()) {
           return 'Вчера'
         }
-
-        // Если в течение недели
         if (diffDays <= 7) {
-          return date.toLocaleDateString('ru-RU', {
-            weekday: 'short',
-            day: 'numeric'
-          })
+          return date.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric' })
         }
-
-        // Более недели назад
         return date.toLocaleDateString('ru-RU', {
           day: 'numeric',
           month: 'short',
           year: diffDays > 365 ? 'numeric' : undefined
         })
       } catch (error) {
-        console.error('Error formatting date:', error, dateString)
         return 'Неверная дата'
       }
     }
@@ -631,10 +549,7 @@ export default {
     const formatMonth = (monthString) => {
       const [year, month] = monthString.split('-')
       const date = new Date(year, parseInt(month) - 1, 1)
-      return date.toLocaleDateString('ru-RU', {
-        month: 'long',
-        year: 'numeric'
-      })
+      return date.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
     }
 
     const editTransaction = (transaction) => {
@@ -656,7 +571,9 @@ export default {
       balanceClass,
       totalBalanceClass,
       getBalanceClass,
-      formatMoney,
+      formatMoneyWithCurrency,
+      formatMoneyAmount,
+      formatTransactionMoney,
       formatDate,
       formatMonth,
       editTransaction

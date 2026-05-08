@@ -171,7 +171,7 @@
                 <label class="form-label">
                   <span class="label-text">Лимит бюджета</span>
                   <span class="label-required">*</span>
-                  <span class="label-hint">(обязательно)</span>
+                  <span class="label-hint">(в BYN)</span>
                 </label>
                 <div class="input-with-icon">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -194,7 +194,7 @@
                   Для категории расходов необходимо установить лимит бюджета
                 </div>
                 <div class="field-hint">
-                  Установите месячный лимит для контроля расходов
+                  Установите месячный лимит для контроля расходов (в белорусских рублях)
                 </div>
               </div>
             </div>
@@ -307,6 +307,7 @@
           <div class="category-content">
             <h4 class="category-name">{{ category.name }}</h4>
 
+            <!-- Статистика за текущий месяц в BYN -->
             <div class="category-stats">
               <div class="stat-item">
                 <div class="stat-label">
@@ -319,7 +320,7 @@
                 <div class="stat-value">{{ category.transaction_count || 0 }}</div>
               </div>
 
-              <!-- Статистика за текущий месяц -->
+              <!-- Общая сумма за месяц в BYN -->
               <div class="stat-item">
                 <div class="stat-label">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -331,20 +332,30 @@
                   Текущий месяц
                 </div>
                 <div class="stat-value" :class="category.type">
-                  {{ formatMoney(category.current_month_total || 0) }}
+                  {{ formatMoney(category.total_amount || 0) }}
                 </div>
               </div>
 
-              <!-- Количество транзакций за месяц -->
-              <div class="stat-item" v-if="category.current_month_count > 0">
+              <!-- Разбивка по валютам -->
+              <div v-if="category.currency_stats && category.currency_stats.length > 0" class="stat-item currency-breakdown">
                 <div class="stat-label">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/>
                     <path d="M12 8v8M8 12h8"/>
                   </svg>
-                  Транзакций за месяц
+                  По валютам
                 </div>
-                <div class="stat-value">{{ category.current_month_count }}</div>
+                <div class="currency-stats">
+                  <div
+                      v-for="stat in category.currency_stats"
+                      :key="stat.currency_code"
+                      class="currency-stat-item"
+                  >
+                    <span class="currency-symbol">{{ stat.currency_symbol }}</span>
+                    <span class="currency-amount">{{ formatMoneyAmount(stat.total_amount) }}</span>
+                    <span class="currency-count">({{ stat.transaction_count }} шт.)</span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -355,19 +366,19 @@
                 <span class="budget-limit">{{ formatMoney(category.budget_limit) }}</span>
               </div>
 
-              <div v-if="category.current_month_total !== undefined" class="budget-progress">
+              <div v-if="category.total_amount !== undefined" class="budget-progress">
                 <div class="progress-bar">
                   <div
                       class="progress-fill"
                       :style="{
-                      width: `${Math.min((category.current_month_total / category.budget_limit) * 100, 100)}%`,
+                      width: `${Math.min((category.total_amount / category.budget_limit) * 100, 100)}%`,
                       backgroundColor: getProgressColor(category)
                     }"
                   ></div>
                 </div>
                 <div class="progress-info">
                   <span class="progress-text">
-                    {{ Math.round((category.current_month_total / category.budget_limit) * 100) }}%
+                    {{ Math.round((category.total_amount / category.budget_limit) * 100) }}%
                   </span>
                   <span v-if="isOverLimit(category)" class="progress-warning">
                     ⚠️ Превышение
@@ -382,7 +393,6 @@
               <span class="transaction-date">
                 Последняя транзакция : {{ formatDate(category.last_transaction_date) }}
               </span>
-
             </div>
             <button
                 v-if="(category.transaction_count || 0) === 0"
@@ -473,12 +483,12 @@ export default {
 
     const displayedCategoriesWithMonthData = computed(() =>
         displayedCategories.value.map(category => {
-          // Все данные уже пришли с сервера
           return {
             ...category,
-            current_month_total: category.current_month_total || 0,
-            current_month_count: category.current_month_count || 0,
-            last_transaction_date: category.last_transaction_date // Используем дату с сервера
+            total_amount: category.total_amount || 0,
+            transaction_count: category.transaction_count || 0,
+            currency_stats: category.currency_stats || [],
+            last_transaction_date: category.last_transaction_date
           }
         })
     )
@@ -502,8 +512,8 @@ export default {
           color: c.color || colorOptions[c.type === 'income' ? 1 : 3],
           budget_limit: c.budget_limit || null,
           transaction_count: c.transaction_count || 0,
-          current_month_total: Math.abs(c.current_month_total || 0),
-          current_month_count: c.current_month_count || 0,
+          total_amount: Math.abs(c.total_amount || 0),
+          currency_stats: c.currency_stats || [],
           last_transaction_date: c.last_transaction_date,
           created_at: c.created_at,
           updated_at: c.updated_at
@@ -511,8 +521,6 @@ export default {
       } catch (err) {
         console.error('Ошибка загрузки категорий:', err)
         error.value = 'Ошибка при загрузке категорий: ' + (err.response?.data?.message || err.message)
-
-        // fallback для разработки
         categories.value = []
       } finally {
         loading.value = false
@@ -615,22 +623,27 @@ export default {
     }
 
     // --- Helpers ---
-    const formatMoney = amount => {
+    const formatMoney = (amount) => {
       if (amount == null || isNaN(amount)) return '0 Br'
       return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount) + ' Br'
     }
 
-    const formatDate = dateString => {
+    const formatMoneyAmount = (amount) => {
+      if (amount == null || isNaN(amount)) return '0'
+      return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)
+    }
+
+    const formatDate = (dateString) => {
       if (!dateString) return 'Нет транзакций'
       const date = new Date(dateString)
       return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
     }
 
-    const isOverLimit = category => category.type === 'expense' && category.budget_limit && category.current_month_total > category.budget_limit
+    const isOverLimit = (category) => category.type === 'expense' && category.budget_limit && category.total_amount > category.budget_limit
 
-    const getProgressColor = category => {
+    const getProgressColor = (category) => {
       if (category.type !== 'expense' || !category.budget_limit) return '#3b82f6'
-      const percent = (category.current_month_total / category.budget_limit) * 100
+      const percent = (category.total_amount / category.budget_limit) * 100
       if (percent >= 100) return '#ef4444'
       if (percent >= 80) return '#f59e0b'
       return '#10b981'
@@ -660,6 +673,7 @@ export default {
       closeModal,
       promptDelete,
       formatMoney,
+      formatMoneyAmount,
       formatDate,
       isOverLimit,
       getProgressColor

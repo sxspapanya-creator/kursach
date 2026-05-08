@@ -9,7 +9,7 @@
           </svg>
           Назад
         </router-link>
-        <h1 class="page-title">Редактировать транзакцию</h1>
+        <h1 class="page-title">Изменить транзакцию</h1>
         <p class="page-subtitle">Измените данные о доходе или расходе</p>
       </div>
     </div>

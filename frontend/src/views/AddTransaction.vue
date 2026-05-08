@@ -215,10 +215,7 @@
                   Сегодня
                 </button>
               </div>
-              <div v-if="dateError" class="error-message">{{ dateError }}</div>
-              <div v-if="availableDatesHint" class="field-hint">
-                ⚠️ Доступные даты: {{ availableDatesHint }}
-              </div>
+
             </div>
 
             <div class="form-group">

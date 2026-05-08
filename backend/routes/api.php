@@ -35,6 +35,7 @@ Route::post('/transactions', [TransactionController::class, 'store']);
 Route::get('/transactions/{id}', [TransactionController::class, 'show']);
 Route::put('/transactions/{id}', [TransactionController::class, 'update']);
 Route::delete('/transactions/{id}', [TransactionController::class, 'destroy']);
+Route::post('/transactions/mass-delete', [TransactionController::class, 'massDelete']);
 
 // Аналитика
 Route::get('/analytics/overview', [AnalyticsController::class, 'overview']);
