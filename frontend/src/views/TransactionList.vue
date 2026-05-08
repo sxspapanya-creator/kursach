@@ -104,7 +104,7 @@
             </div>
             <div class="summary-content">
               <div class="summary-label">Общий доход</div>
-              <div class="summary-amount income">{{ formatMoney(filteredStats.income) }}</div>
+              <div class="summary-amount income">{{ formatMoneyAmount(filteredStats.income) }} Br</div>
             </div>
           </div>
 
@@ -117,7 +117,7 @@
             </div>
             <div class="summary-content">
               <div class="summary-label">Общий расход</div>
-              <div class="summary-amount expense">{{ formatMoney(filteredStats.expenses) }}</div>
+              <div class="summary-amount expense">{{ formatMoneyAmount(filteredStats.expenses) }} Br</div>
             </div>
           </div>
 
@@ -133,7 +133,7 @@
             <div class="summary-content">
               <div class="summary-label">Баланс</div>
               <div class="summary-amount" :class="filteredBalanceClass">
-                {{ formatMoney(filteredStats.balance) }}
+                {{ formatMoneyAmount(filteredStats.balance) }} Br
               </div>
             </div>
           </div>
@@ -225,7 +225,11 @@
               <div class="transaction-amount-container">
                 <div class="transaction-amount" :class="transaction.type">
                   <span class="amount-sign">{{ transaction.type === 'income' ? '+' : '-' }}</span>
-                  {{ formatMoney(transaction.amount) }}
+                  {{ formatTransactionMoney(transaction) }}
+                </div>
+                <!-- Показываем курс только если валюта НЕ BYN -->
+                <div v-if="transaction.currency?.code !== 'BYN' && transaction.exchange_rate" class="transaction-rate">
+                  1 {{ transaction.currency?.code || getCurrencyCode(transaction.currency_id) }} = {{ formatRate(transaction.exchange_rate) }} Br
                 </div>
                 <div class="transaction-actions">
                   <button
@@ -276,6 +280,91 @@ export default {
       month: new Date().toISOString().slice(0, 7)
     })
 
+    // Символы валют для 5 основных валют
+    const getCurrencySymbol = (currencyId, currencyCode) => {
+      if (currencyCode) {
+        const symbols = {
+          'BYN': 'Br',
+          'RUB': '₽',
+          'USD': '$',
+          'EUR': '€',
+          'CNY': '¥'
+        }
+        return symbols[currencyCode] || 'Br'
+      }
+
+      const symbols = {
+        1: 'Br',   // BYN
+        2: '₽',    // RUB
+        3: '$',    // USD
+        4: '€',    // EUR
+        5: '¥'     // CNY
+      }
+      return symbols[currencyId] || 'Br'
+    }
+
+    // Код валюты по ID
+    const getCurrencyCode = (currencyId) => {
+      const codes = {
+        1: 'BYN',
+        2: 'RUB',
+        3: 'USD',
+        4: 'EUR',
+        5: 'CNY'
+      }
+      return codes[currencyId] || 'BYN'
+    }
+
+    // Форматирование курса (4 знака после запятой)
+    const formatRate = (rate) => {
+      if (!rate && rate !== 0) return '0.0000'
+      return Number(rate).toFixed(4)
+    }
+
+    // Форматирование суммы для транзакции (с валютой)
+    const formatTransactionMoney = (transaction) => {
+      if (!transaction) return '0 Br'
+      const amount = transaction.amount || 0
+      const currencySymbol = transaction.currency?.symbol || getCurrencySymbol(transaction.currency_id, transaction.currency?.code)
+
+      return new Intl.NumberFormat('ru-RU', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(amount) + ' ' + currencySymbol
+    }
+
+    // Форматирование просто суммы (для сводки)
+    const formatMoneyAmount = (amount) => {
+      if (amount === null || amount === undefined || isNaN(amount)) return '0'
+      return new Intl.NumberFormat('ru-RU', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(amount)
+    }
+
+    const formatDate = (dateString) => {
+      if (!dateString) return 'Дата не указана'
+      try {
+        const date = new Date(dateString)
+        return date.toLocaleDateString('ru-RU', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric'
+        })
+      } catch {
+        return 'Неверная дата'
+      }
+    }
+
+    const getPaymentMethodLabel = (method) => {
+      const methods = {
+        cash: 'Наличные',
+        card: 'Карта',
+        transfer: 'Перевод'
+      }
+      return methods[method] || method
+    }
+
     const fetchTransactions = async () => {
       try {
         loading.value = true
@@ -321,47 +410,24 @@ export default {
       fetchTransactions()
     }
 
-    const formatMoney = (amount) => {
-      if (amount === null || amount === undefined || isNaN(amount)) return '0 Br'
-      return new Intl.NumberFormat('ru-RU', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }).format(amount) + ' Br'
-    }
-
-    const formatDate = (dateString) => {
-      if (!dateString) return 'Дата не указана'
-      try {
-        const date = new Date(dateString)
-        return date.toLocaleDateString('ru-RU', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric'
-        })
-      } catch {
-        return 'Неверная дата'
-      }
-    }
-
-    const getPaymentMethodLabel = (method) => {
-      const methods = {
-        cash: 'Наличные',
-        card: 'Карта',
-        transfer: 'Перевод'
-      }
-      return methods[method] || method
-    }
-
-    // Computed properties
+    // Computed properties для сводки (суммы в BYN)
     const filteredStats = computed(() => {
       let income = 0
       let expenses = 0
 
       transactions.value.forEach(transaction => {
+        // Используем amount_in_byn если есть, иначе конвертируем через курс
+        let amountInByn = transaction.amount_in_byn || transaction.amount
+
+        // Если нет amount_in_byn, но есть курс
+        if (!transaction.amount_in_byn && transaction.exchange_rate) {
+          amountInByn = transaction.amount * transaction.exchange_rate
+        }
+
         if (transaction.type === 'income') {
-          income += parseFloat(transaction.amount) || 0
+          income += parseFloat(amountInByn) || 0
         } else if (transaction.type === 'expense') {
-          expenses += parseFloat(transaction.amount) || 0
+          expenses += parseFloat(amountInByn) || 0
         }
       })
 
@@ -389,9 +455,12 @@ export default {
       editTransaction,
       deleteTransaction,
       resetFilters,
-      formatMoney,
+      formatTransactionMoney,
+      formatMoneyAmount,
+      formatRate,
       formatDate,
-      getPaymentMethodLabel
+      getPaymentMethodLabel,
+      getCurrencyCode
     }
   }
 }

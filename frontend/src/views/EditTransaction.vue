@@ -103,9 +103,46 @@
                     :class="{ 'error': amountError }"
                     @input="validateAmount"
                 />
-                <span class="currency-symbol">Br</span>
+                <span class="currency-symbol">{{ currentCurrencySymbol }}</span>
               </div>
               <div v-if="amountError" class="error-message">{{ amountError }}</div>
+            </div>
+          </div>
+
+          <!-- Валюта -->
+          <div class="form-section">
+            <div class="form-header">
+              <h3 class="section-title">Валюта</h3>
+            </div>
+
+            <div v-if="currencies.length === 0" class="no-currencies">
+              <div class="no-currencies-icon">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+              </div>
+              <p>Загрузка валют...</p>
+            </div>
+
+            <div v-else class="currencies-grid">
+              <div
+                  v-for="currency in currencies"
+                  :key="currency.id"
+                  class="currency-option"
+                  :class="{ selected: form.currency_id === currency.id }"
+                  @click="selectCurrency(currency)"
+              >
+                <div class="currency-flag">{{ getCurrencyFlag(currency.code) }}</div>
+                <div class="currency-name">{{ currency.name }}</div>
+                <div class="currency-rate">{{ formatRate(currency.rate) }} Br</div>
+                <div v-if="form.currency_id === currency.id" class="currency-check">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 6L9 17l-5-5"/>
+                  </svg>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -146,9 +183,6 @@
                   <div class="category-color" :style="{ backgroundColor: category.color || '#95a5a6' }"></div>
                   <div class="category-name">{{ category.name }}</div>
                 </div>
-                <div class="category-budget" v-if="category.budget_limit">
-                  Лимит: {{ formatMoney(category.budget_limit) }}
-                </div>
                 <div v-if="form.category_ids.includes(category.id)" class="category-check">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M20 6L9 17l-5-5"/>
@@ -184,14 +218,23 @@
                       type="date"
                       required
                       class="form-input"
+                      :class="{ 'date-disabled': isDateUnavailable }"
+                      :min="minDate"
+                      :max="maxDate"
+                      @input="validateDate"
                   />
                   <button
                       type="button"
-                      @click="form.date = new Date().toISOString().split('T')[0]"
+                      @click="setTodayDate"
                       class="date-today"
+                      :disabled="isTodayUnavailable"
                   >
                     Сегодня
                   </button>
+                </div>
+                <div v-if="dateError" class="error-message">{{ dateError }}</div>
+                <div v-if="availableDatesHint" class="field-hint">
+                  ⚠️ Доступные даты: {{ availableDatesHint }}
                 </div>
               </div>
 
@@ -213,20 +256,11 @@
             </div>
           </div>
 
-          <!-- Рекомендации -->
-          <div v-if="budgetWarning" class="warning-card">
-            <div class="warning-icon">⚠️</div>
-            <div class="warning-content">
-              <h4>Превышение бюджета</h4>
-              <p>Эта трата превысит лимит категории на {{ budgetWarning.overspend }}</p>
-            </div>
-          </div>
-
           <!-- Действия -->
           <div class="form-actions">
             <button
                 type="submit"
-                :disabled="submitting || !isFormValid"
+                :disabled="submitting || !isFormValid || isDateUnavailable"
                 class="btn btn-primary btn-large"
             >
               <span v-if="submitting" class="spinner"></span>
@@ -263,9 +297,13 @@ export default {
     const submitting = ref(false)
     const error = ref('')
     const amountError = ref('')
+    const dateError = ref('')
     const categories = ref([])
-    const budgetWarning = ref(null)
-    const isDataLoaded = ref(false)  // ← добавить флаг
+    const currencies = ref([])
+    const availableDates = ref([])
+    const allDatesAllowed = ref(false)
+    const minDate = ref('')
+    const maxDate = ref('')
 
     const paymentMethods = [
       { value: 'card', name: 'Карта', icon: '💳' },
@@ -277,10 +315,133 @@ export default {
       amount: '',
       type: 'expense',
       category_ids: [],
+      currency_id: null,
       description: '',
       date: new Date().toISOString().split('T')[0],
       payment_method: 'card'
     })
+
+    // Установка минимальной и максимальной даты (последние 6 месяцев)
+    const setDateRange = () => {
+      const today = new Date()
+      const sixMonthsAgo = new Date()
+      sixMonthsAgo.setMonth(today.getMonth() - 6)
+      maxDate.value = today.toISOString().split('T')[0]
+      minDate.value = sixMonthsAgo.toISOString().split('T')[0]
+    }
+
+    // Получение доступных дат для выбранной валюты
+    const fetchAvailableDates = async (currencyId) => {
+      if (!currencyId) return
+
+      try {
+        const response = await axios.get('/api/currencies/available-dates', {
+          params: { currency_id: currencyId }
+        })
+
+        availableDates.value = response.data.data.available_dates || []
+        allDatesAllowed.value = response.data.data.all_dates_allowed || false
+
+        if (form.value.date) {
+          validateDate()
+        }
+      } catch (err) {
+        console.error('Error fetching available dates:', err)
+      }
+    }
+
+    // Проверка доступности даты
+    const isDateAvailable = (date) => {
+      if (allDatesAllowed.value) return true
+      if (!date) return false
+      return availableDates.value.includes(date)
+    }
+
+    // Проверка валидности даты
+    const validateDate = () => {
+      if (!form.value.date) {
+        dateError.value = ''
+        return
+      }
+
+      if (!isDateAvailable(form.value.date)) {
+        dateError.value = `На дату ${form.value.date} нет курса для выбранной валюты.`
+      } else {
+        dateError.value = ''
+      }
+    }
+
+    // Доступна ли сегодняшняя дата
+    const isTodayUnavailable = computed(() => {
+      const today = new Date().toISOString().split('T')[0]
+      return !isDateAvailable(today) && !allDatesAllowed.value
+    })
+
+    // Установка сегодняшней даты
+    const setTodayDate = () => {
+      const today = new Date().toISOString().split('T')[0]
+      if (isDateAvailable(today) || allDatesAllowed.value) {
+        form.value.date = today
+        dateError.value = ''
+      }
+    }
+
+    // Подсказка по доступным датам
+    const availableDatesHint = computed(() => {
+      if (allDatesAllowed.value) return ''
+      if (availableDates.value.length === 0) return 'Нет доступных дат'
+      if (availableDates.value.length > 10) {
+        return `${availableDates.value[0]} ... ${availableDates.value[availableDates.value.length - 1]} (${availableDates.value.length} дат)`
+      }
+      return availableDates.value.join(', ')
+    })
+
+    // Блокировка даты в календаре через атрибут
+    const isDateUnavailable = computed(() => {
+      return !allDatesAllowed.value && !isDateAvailable(form.value.date) && form.value.date !== ''
+    })
+
+    // Выбор валюты
+    const selectCurrency = (currency) => {
+      form.value.currency_id = currency.id
+      fetchAvailableDates(currency.id)
+    }
+
+    // Текущая выбранная валюта
+    const currentCurrency = computed(() => {
+      return currencies.value.find(c => c.id === form.value.currency_id)
+    })
+
+    // Символ текущей валюты
+    const currentCurrencySymbol = computed(() => {
+      if (!currentCurrency.value) return 'Br'
+      const symbols = {
+        'BYN': 'Br',
+        'RUB': '₽',
+        'USD': '$',
+        'EUR': '€',
+        'CNY': '¥',
+      }
+      return symbols[currentCurrency.value.code] || currentCurrency.value.code
+    })
+
+    // Флаги для валют
+    const getCurrencyFlag = (code) => {
+      const flags = {
+        'BYN': '🇧🇾',
+        'RUB': '🇷🇺',
+        'USD': '🇺🇸',
+        'EUR': '🇪🇺',
+        'CNY': '🇨🇳',
+      }
+      return flags[code] || '💰'
+    }
+
+    // Форматирование курса
+    const formatRate = (rate) => {
+      if (!rate && rate !== 0) return '0.0000'
+      return Number(rate).toFixed(4)
+    }
 
     const filteredCategories = computed(() => {
       if (!categories.value || !Array.isArray(categories.value)) {
@@ -295,40 +456,40 @@ export default {
       return form.value.amount > 0 &&
           form.value.category_ids &&
           form.value.category_ids.length > 0 &&
-          form.value.date
+          form.value.currency_id !== null &&
+          form.value.date &&
+          !dateError.value
     })
 
     const fetchTransaction = async () => {
       try {
         loading.value = true
         error.value = false
-        isDataLoaded.value = false
 
         const transactionId = props.id || route.params.id
 
-        // Загружаем оба ресурса
-        const [transactionRes, categoriesRes] = await Promise.all([
+        const [transactionRes, categoriesRes, currenciesRes] = await Promise.all([
           axios.get(`/api/transactions/${transactionId}`),
-          axios.get('/api/categories')
+          axios.get('/api/categories'),
+          axios.get('/api/currencies')
         ])
 
         const transactionData = transactionRes.data.data || transactionRes.data
         const categoriesData = categoriesRes.data.data || categoriesRes.data
+        const currenciesData = currenciesRes.data.data || currenciesRes.data
 
         if (!transactionData) {
           throw new Error('Транзакция не найдена')
         }
 
-        // Сохраняем категории
         categories.value = categoriesData
+        currencies.value = currenciesData
 
-        // Форматируем дату
         let formattedDate = transactionData.date
         if (formattedDate) {
           formattedDate = formattedDate.split('T')[0]
         }
 
-        // Получаем ID категорий
         let categoryIds = []
         if (transactionData.categories && Array.isArray(transactionData.categories)) {
           categoryIds = transactionData.categories.map(cat => cat.id)
@@ -338,15 +499,17 @@ export default {
           categoryIds = [transactionData.category.id]
         }
 
-        // Обновляем форму
         form.value.amount = transactionData.amount || ''
         form.value.type = transactionData.type || 'expense'
         form.value.category_ids = categoryIds
+        form.value.currency_id = transactionData.currency_id || null
         form.value.description = transactionData.description || ''
         form.value.date = formattedDate
         form.value.payment_method = transactionData.payment_method || 'card'
 
-        isDataLoaded.value = true
+        if (form.value.currency_id) {
+          await fetchAvailableDates(form.value.currency_id)
+        }
 
         console.log('Data loaded. Category IDs:', form.value.category_ids)
 
@@ -381,14 +544,6 @@ export default {
       }
     }
 
-    const formatMoney = (amount) => {
-      if (amount === null || amount === undefined) return '0 Br'
-      return new Intl.NumberFormat('ru-RU', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }).format(amount) + ' Br'
-    }
-
     const updateTransaction = async () => {
       if (!isFormValid.value) return
 
@@ -402,6 +557,7 @@ export default {
           amount: parseFloat(form.value.amount),
           type: form.value.type,
           category_ids: form.value.category_ids,
+          currency_id: form.value.currency_id,
           description: form.value.description,
           date: form.value.date,
           payment_method: form.value.payment_method
@@ -426,11 +582,22 @@ export default {
     }
 
     onMounted(() => {
+      setDateRange()
       fetchTransaction()
     })
 
     watch(() => form.value.type, () => {
       form.value.category_ids = []
+    })
+
+    watch(() => form.value.date, () => {
+      validateDate()
+    })
+
+    watch(() => form.value.currency_id, (newVal, oldVal) => {
+      if (newVal && newVal !== oldVal) {
+        fetchAvailableDates(newVal)
+      }
     })
 
     return {
@@ -439,16 +606,26 @@ export default {
       submitting,
       error,
       amountError,
+      dateError,
       categories,
+      currencies,
       filteredCategories,
       paymentMethods,
-      budgetWarning,
       isFormValid,
+      currentCurrencySymbol,
+      getCurrencyFlag,
+      formatRate,
       validateAmount,
       toggleCategory,
-      formatMoney,
       fetchTransaction,
-      updateTransaction
+      updateTransaction,
+      selectCurrency,
+      minDate,
+      maxDate,
+      isDateUnavailable,
+      isTodayUnavailable,
+      setTodayDate,
+      availableDatesHint
     }
   }
 }

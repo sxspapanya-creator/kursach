@@ -66,4 +66,70 @@ class CurrencyController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Получить список дат, для которых есть курсы по всем валютам
+     */
+    public function getAvailableDates(Request $request)
+    {
+        try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $currencyId = $request->query('currency_id');
+
+            if (!$currencyId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'currency_id is required'
+                ], 422);
+            }
+
+            $currency = Currency::find($currencyId);
+
+            if ($currency->code === 'BYN') {
+                // Для BYN доступны все даты
+                return response()->json([
+                    'status' => 'success',
+                    'data' => [
+                        'available_dates' => [],
+                        'all_dates_allowed' => true
+                    ]
+                ]);
+            }
+
+            $byn = Currency::where('code', 'BYN')->first();
+
+            // Получаем все даты, для которых есть курс
+            $dates = CurrencyRate::where('from_currency_id', $currencyId)
+                ->where('to_currency_id', $byn->id)
+                ->select('date')
+                ->distinct()
+                ->orderBy('date', 'asc')
+                ->get()
+                ->pluck('date')
+                ->map(function ($date) {
+                    return $date->format('Y-m-d');
+                });
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'available_dates' => $dates,
+                    'all_dates_allowed' => false
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to fetch available dates: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }

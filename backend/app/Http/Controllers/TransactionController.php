@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Transaction;
 use App\Models\Category;
+use App\Models\Currency;
+use App\Models\CurrencyRate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -33,7 +35,7 @@ class TransactionController extends Controller
                 'limit' => 'nullable|integer|min:1|max:10000'
             ]);
 
-            $query = Transaction::where('user_id', $userId)->with('categories');
+            $query = Transaction::where('user_id', $userId)->with(['categories', 'currency']);
 
             // Фильтрация по типу
             if (isset($validated['type'])) {
@@ -82,9 +84,38 @@ class TransactionController extends Controller
                 ->take($limit)
                 ->get();
 
+            // Получаем базовую валюту BYN для конвертации
+            $byn = Currency::where('code', 'BYN')->first();
+
+            // Добавляем курс конвертации к каждой транзакции
+            $transactionsWithRates = $transactions->map(function ($transaction) use ($byn) {
+                if ($transaction->currency_id && $transaction->currency_id != $byn->id) {
+                    $rate = CurrencyRate::where('from_currency_id', $transaction->currency_id)
+                        ->where('to_currency_id', $byn->id)
+                        ->where('date', $transaction->date)
+                        ->first();
+
+                    if (!$rate) {
+                        $rate = CurrencyRate::where('from_currency_id', $transaction->currency_id)
+                            ->where('to_currency_id', $byn->id)
+                            ->where('date', '<=', $transaction->date)
+                            ->orderBy('date', 'desc')
+                            ->first();
+                    }
+
+                    $transaction->exchange_rate = $rate ? $rate->rate : null;
+                    $transaction->amount_in_byn = $rate ? $transaction->amount * $rate->rate : $transaction->amount;
+                } else {
+                    $transaction->exchange_rate = 1;
+                    $transaction->amount_in_byn = $transaction->amount;
+                }
+
+                return $transaction;
+            });
+
             return response()->json([
                 'status' => 'success',
-                'data' => $transactions,
+                'data' => $transactionsWithRates,
                 'meta' => [
                     'total' => $transactions->count(),
                     'limit' => $limit
@@ -144,7 +175,31 @@ class TransactionController extends Controller
                 ], 422);
             }
 
-            // Создаем транзакцию (без category_id)
+            // === ВАЛИДАЦИЯ НАЛИЧИЯ КУРСА НА ДАТУ ===
+            $currency = Currency::find($validated['currency_id']);
+
+            // Для BYN всегда есть курс (1), пропускаем проверку
+            if ($currency->code !== 'BYN') {
+                $byn = Currency::where('code', 'BYN')->first();
+
+                // Проверяем, есть ли курс на указанную дату
+                $hasRate = CurrencyRate::where('from_currency_id', $currency->id)
+                    ->where('to_currency_id', $byn->id)
+                    ->where('date', $validated['date'])
+                    ->exists();
+
+                if (!$hasRate) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Validation failed',
+                        'errors' => [
+                            'date' => ["На дату {$validated['date']} нет курса для валюты {$currency->code}. Выберите другую дату."]
+                        ]
+                    ], 422);
+                }
+            }
+
+            // Создаем транзакцию
             $transaction = Transaction::create([
                 'amount' => $validated['amount'],
                 'type' => $validated['type'],
@@ -152,7 +207,7 @@ class TransactionController extends Controller
                 'date' => $validated['date'],
                 'payment_method' => $validated['payment_method'],
                 'user_id' => $userId,
-                'currency_id' => $validated['currency_id'] // ID базовой валюты, можно сделать динамически
+                'currency_id' => $validated['currency_id']
             ]);
 
             // Привязываем категории
@@ -161,8 +216,9 @@ class TransactionController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'Transaction created successfully',
-                'data' => $transaction->load('categories')
+                'data' => $transaction->load(['categories', 'currency'])
             ], 201);
+
         } catch (ValidationException $e) {
             return response()->json([
                 'status' => 'error',
@@ -189,7 +245,7 @@ class TransactionController extends Controller
             }
 
             $transaction = Transaction::where('user_id', $userId)
-                ->with('categories')
+                ->with(['categories', 'currency'])
                 ->findOrFail($id);
 
             return response()->json([
@@ -224,7 +280,8 @@ class TransactionController extends Controller
                 'category_ids.*' => 'integer|exists:categories,id',
                 'description' => 'nullable|string|max:500',
                 'date' => 'sometimes|required|date',
-                'payment_method' => 'sometimes|required|in:cash,card,transfer'
+                'payment_method' => 'sometimes|required|in:cash,card,transfer',
+                'currency_id' => 'sometimes|required|exists:currencies,id'
             ]);
 
             // Если обновляются категории
@@ -256,7 +313,7 @@ class TransactionController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'Transaction updated successfully',
-                'data' => $transaction->load('categories')
+                'data' => $transaction->load(['categories', 'currency'])
             ]);
         } catch (ValidationException $e) {
             return response()->json([
@@ -284,8 +341,7 @@ class TransactionController extends Controller
             }
 
             $transaction = Transaction::where('user_id', $userId)->findOrFail($id);
-
-            // Категории отвяжутся автоматически (cascade)
+            $transaction->categories()->detach();
             $transaction->delete();
 
             return response()->json([
@@ -371,7 +427,7 @@ class TransactionController extends Controller
             $limit = $validated['limit'] ?? 10;
 
             $transactions = Transaction::where('user_id', $userId)
-                ->with('categories')
+                ->with(['categories', 'currency'])
                 ->orderBy('date', 'desc')
                 ->orderBy('created_at', 'desc')
                 ->take($limit)

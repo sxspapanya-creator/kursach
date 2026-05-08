@@ -45,6 +45,7 @@ Route::get('/analytics/budget-progress', [AnalyticsController::class, 'budgetPro
 Route::get('/analytics/financial-health', [AnalyticsController::class, 'financialHealth']);
 
 Route::get('/currencies', [CurrencyController::class, 'index']);
+Route::get('/currencies/available-dates', [CurrencyController::class, 'getAvailableDates']);
 
 // Fallback
 Route::fallback(function () {

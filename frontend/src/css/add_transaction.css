@@ -742,4 +742,21 @@
         font-weight: 600;
         color: #3b82f6;
     }
+
+    /* Стили для недоступной даты */
+    .date-input-wrapper input.date-disabled {
+        border-color: #ef4444;
+        background-color: #fef2f2;
+    }
+
+    .date-today:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .field-hint {
+        font-size: 0.75rem;
+        color: #f59e0b;
+        margin-top: 0.25rem;
+    }
 }

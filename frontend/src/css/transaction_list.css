@@ -608,4 +608,11 @@
         width: 100%;
         justify-content: center;
     }
+
+    .transaction-rate {
+        font-size: 0.7rem;
+        color: #64748b;
+        margin-top: 0.25rem;
+        text-align: right;
+    }
 }
