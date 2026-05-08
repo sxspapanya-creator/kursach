@@ -1,4 +1,4 @@
-FROM dunglas/frankenphp:latest
+FROM dunglas/frankenphp:php8.4
 
 RUN apt-get update && apt-get install -y \
     git \
@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     libonig-dev \
     libxml2-dev \
     default-mysql-client \
+    bash \
     && docker-php-ext-install pdo pdo_mysql mbstring zip \
     && rm -rf /var/lib/apt/lists/*
 
@@ -15,17 +16,14 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
 
-COPY composer.json composer.lock* ./
+COPY . .
 
 RUN composer install --no-dev --no-autoloader --no-scripts --no-progress --prefer-dist
 
-COPY . .
-
 RUN composer dump-autoload --optimize
 
-RUN chown -R www-data:www-data /app \
-    && chmod -R 755 /app/storage
+RUN chmod -R 777 /app
 
 EXPOSE 80
 
-CMD ["frankenphp", "run"]
+CMD ["bash", "-c", "frankenphp run"]

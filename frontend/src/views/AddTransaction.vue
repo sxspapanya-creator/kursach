@@ -92,6 +92,36 @@
           </div>
         </div>
 
+        <!-- Валюта -->
+        <div class="form-section">
+          <div class="form-header">
+            <h3 class="section-title">Валюта</h3>
+          </div>
+          <div v-if="currencies.length === 0" class="no-currencies">
+            <div class="no-currencies-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </div>
+            <p>Загрузка валют...</p>
+          </div>
+          <div v-else class="currency-selector">
+            <div
+                v-for="currency in currencies"
+                :key="currency.id"
+                class="currency-option"
+                :class="{ selected: form.currency_id === currency.id }"
+                @click="form.currency_id = currency.id"
+            >
+              <div class="currency-code">{{ currency.code }}</div>
+              <div class="currency-name">{{ currency.name }}</div>
+              <div class="currency-rate">{{ currency.rate }} Br</div>
+            </div>
+          </div>
+        </div>
+
         <!-- Категория -->
         <div class="form-section">
           <div class="form-header">
@@ -128,9 +158,6 @@
               <div class="category-info">
                 <div class="category-color" :style="{ backgroundColor: category.color || '#95a5a6' }"></div>
                 <div class="category-name">{{ category.name }}</div>
-              </div>
-              <div class="category-budget" v-if="category.budget_limit">
-                Лимит: {{ formatMoney(category.budget_limit) }}
               </div>
               <div v-if="form.category_ids.includes(category.id)" class="category-check">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -196,15 +223,6 @@
           </div>
         </div>
 
-        <!-- Рекомендации -->
-        <div v-if="budgetWarning" class="warning-card">
-          <div class="warning-icon">⚠️</div>
-          <div class="warning-content">
-            <h4>Превышение бюджета</h4>
-            <p>Эта трата превысит лимит категории на {{ budgetWarning.overspend }}</p>
-          </div>
-        </div>
-
         <!-- Действия -->
         <div class="form-actions">
           <button
@@ -246,7 +264,7 @@ export default {
     const error = ref('')
     const amountError = ref('')
     const categories = ref([])
-    const budgetWarning = ref(null)
+    const currencies = ref([])
 
     const paymentMethods = [
       { value: 'card', name: 'Карта', icon: '💳' },
@@ -257,7 +275,8 @@ export default {
     const form = ref({
       amount: '',
       type: 'expense',
-      category_ids: [],  // ← ИЗМЕНЕНО: массив
+      category_ids: [],
+      currency_id: null,
       description: '',
       date: new Date().toISOString().split('T')[0],
       payment_method: 'card',
@@ -271,7 +290,8 @@ export default {
 
     const isFormValid = computed(() => {
       return form.value.amount > 0 &&
-          form.value.category_ids.length > 0 &&  // ← ИЗМЕНЕНО
+          form.value.category_ids.length > 0 &&
+          form.value.currency_id !== null &&
           form.value.date
     })
 
@@ -281,6 +301,21 @@ export default {
         categories.value = response.data.data || []
       } catch (error) {
         console.error('Error fetching categories:', error)
+      }
+    }
+
+    const fetchCurrencies = async () => {
+      try {
+        const response = await axios.get('/api/currencies')
+        currencies.value = response.data.data || []
+        const defaultCurrency = currencies.value.find(c => c.code === 'BYN')
+        if (defaultCurrency) {
+          form.value.currency_id = defaultCurrency.id
+        } else if (currencies.value.length) {
+          form.value.currency_id = currencies.value[0].id
+        }
+      } catch (error) {
+        console.error('Error fetching currencies:', error)
       }
     }
 
@@ -295,21 +330,13 @@ export default {
       }
     }
 
-    const toggleCategory = (categoryId) => {  // ← НОВЫЙ МЕТОД
+    const toggleCategory = (categoryId) => {
       const index = form.value.category_ids.indexOf(categoryId)
       if (index === -1) {
         form.value.category_ids.push(categoryId)
       } else {
         form.value.category_ids.splice(index, 1)
       }
-    }
-
-    const formatMoney = (amount) => {
-      if (amount === null || amount === undefined) return '0 Br'
-      return new Intl.NumberFormat('ru-RU', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }).format(amount) + ' Br'
     }
 
     const submitTransaction = async () => {
@@ -322,7 +349,8 @@ export default {
         const transactionData = {
           amount: parseFloat(form.value.amount),
           type: form.value.type,
-          category_ids: form.value.category_ids,  // ← ИЗМЕНЕНО
+          category_ids: form.value.category_ids,
+          currency_id: form.value.currency_id,
           description: form.value.description,
           date: form.value.date,
           payment_method: form.value.payment_method
@@ -349,10 +377,11 @@ export default {
 
     onMounted(() => {
       fetchCategories()
+      fetchCurrencies()
     })
 
     watch(() => form.value.type, () => {
-      form.value.category_ids = []  // ← ИЗМЕНЕНО
+      form.value.category_ids = []
     })
 
     return {
@@ -361,13 +390,12 @@ export default {
       error,
       amountError,
       categories,
+      currencies,
       filteredCategories,
       paymentMethods,
-      budgetWarning,
       isFormValid,
       validateAmount,
-      toggleCategory,  // ← НОВЫЙ МЕТОД
-      formatMoney,
+      toggleCategory,
       submitTransaction
     }
   }
@@ -607,6 +635,63 @@ export default {
   font-weight: 500;
 }
 
+/* Валюты */
+.currency-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.currency-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 100px;
+}
+
+.currency-option.selected {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.currency-code {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.currency-name {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.currency-rate {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #3b82f6;
+}
+
+.no-currencies {
+  text-align: center;
+  padding: 2rem;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 2px dashed #e2e8f0;
+}
+
+.no-currencies-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 1rem;
+  color: #94a3b8;
+}
+
 /* Категории */
 .no-categories {
   text-align: center;
@@ -674,14 +759,6 @@ export default {
   font-weight: 600;
   color: #1e293b;
   font-size: 0.875rem;
-}
-
-.category-budget {
-  font-size: 0.75rem;
-  color: #64748b;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .category-check {
@@ -798,96 +875,6 @@ export default {
   font-size: 0.75rem;
   font-weight: 500;
   color: #475569;
-}
-
-.priority-select {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.priority-option {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.priority-option:hover {
-  border-color: #cbd5e1;
-}
-
-.priority-option.selected {
-  border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.05);
-}
-
-.priority-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-}
-
-.priority-option.essential .priority-dot {
-  background: #ef4444;
-}
-
-.priority-option.important .priority-dot {
-  background: #f59e0b;
-}
-
-.priority-option.normal .priority-dot {
-  background: #3b82f6;
-}
-
-.priority-option.optional .priority-dot {
-  background: #94a3b8;
-}
-
-.priority-name {
-  font-size: 0.875rem;
-  color: #475569;
-  font-weight: 500;
-}
-
-.priority-option.selected .priority-name {
-  color: #1e293b;
-  font-weight: 600;
-}
-
-/* Предупреждения */
-.warning-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 1rem;
-  padding: 1.25rem;
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  border-radius: 12px;
-  margin-bottom: 1.5rem;
-}
-
-.warning-icon {
-  font-size: 1.5rem;
-  flex-shrink: 0;
-}
-
-.warning-content h4 {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #d97706;
-  margin: 0 0 0.25rem 0;
-}
-
-.warning-content p {
-  font-size: 0.875rem;
-  color: #92400e;
-  margin: 0;
-  line-height: 1.4;
 }
 
 /* Действия формы */
@@ -1024,6 +1011,15 @@ export default {
     right: 1.25rem;
   }
 
+  .currency-selector {
+    gap: 0.5rem;
+  }
+
+  .currency-option {
+    padding: 0.5rem 0.75rem;
+    min-width: 80px;
+  }
+
   .categories-grid {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     gap: 0.75rem;
@@ -1060,6 +1056,23 @@ export default {
 
   .amount-field {
     font-size: 1.5rem;
+  }
+
+  .currency-option {
+    padding: 0.5rem;
+    min-width: 70px;
+  }
+
+  .currency-code {
+    font-size: 0.875rem;
+  }
+
+  .currency-name {
+    font-size: 0.7rem;
+  }
+
+  .currency-rate {
+    font-size: 0.6rem;
   }
 
   .categories-grid {

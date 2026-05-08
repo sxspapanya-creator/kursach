@@ -7,8 +7,6 @@ use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TransactionController;
 use Illuminate\Support\Facades\Route;
 
-Route::resource('tasks', TaskController::class);
-
 Route::group(['prefix' => '/'], function ($route) {
     $route->get('/health-check', function (){
         return response()->json(['status' => 'ok']);

@@ -6,6 +6,7 @@ use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\AnalyticsController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\CurrencyController;
 
 // Health check
 Route::get('/health-check', function () {
@@ -42,6 +43,8 @@ Route::get('/analytics/monthly-trends', [AnalyticsController::class, 'monthlyTre
 Route::get('/analytics/category-comparison', [AnalyticsController::class, 'categoryComparison']);
 Route::get('/analytics/budget-progress', [AnalyticsController::class, 'budgetProgress']);
 Route::get('/analytics/financial-health', [AnalyticsController::class, 'financialHealth']);
+
+Route::get('/currencies', [CurrencyController::class, 'index']);
 
 // Fallback
 Route::fallback(function () {
