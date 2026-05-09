@@ -85,8 +85,7 @@ class AuthSessionMiddleware
             ], Response::HTTP_UNAUTHORIZED);
         }
 
-        // Аутентифицируем пользователя
-        Auth::login($user);
+        Auth::setUser($user);
 
         // Обновляем время последнего использования токена
         $token->forceFill([
