@@ -183,7 +183,7 @@ class CurrencyService
 
                 if (isset($data['Cur_OfficialRate'])) {
                     $rate = $data['Cur_OfficialRate'] / $data['Cur_Scale'];
-                    return round($rate, 6);
+                    return $rate;
                 }
             }
 
@@ -324,7 +324,7 @@ class CurrencyService
 
             if ($apiRate) {
                 $newRate = $apiRate['Cur_OfficialRate'] / $apiRate['Cur_Scale'];
-                $newRate = round($newRate, 6);
+                //$newRate = round($newRate, 6);
 
                 CurrencyRate::updateOrCreate(
                     [

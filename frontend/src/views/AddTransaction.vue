@@ -76,7 +76,7 @@
           <div class="amount-input-wrapper">
             <div class="amount-input">
               <input
-                  v-model.number="form.amount"
+                  v-model="form.amount"
                   type="number"
                   step="0.01"
                   min="0.01"
@@ -210,12 +210,11 @@
                     type="button"
                     @click="setTodayDate"
                     class="date-today"
-                    :disabled="isTodayUnavailable"
                 >
                   Сегодня
                 </button>
               </div>
-
+              <div v-if="dateError" class="error-message">{{ dateError }}</div>
             </div>
 
             <div class="form-group">
@@ -240,7 +239,7 @@
         <div class="form-actions">
           <button
               type="submit"
-              :disabled="loading || !isFormValid || isDateUnavailable"
+              :disabled="loading || !isFormValid"
               class="btn btn-primary btn-large"
           >
             <span v-if="loading" class="spinner"></span>
@@ -321,7 +320,6 @@ export default {
         availableDates.value = response.data.data.available_dates || []
         allDatesAllowed.value = response.data.data.all_dates_allowed || false
 
-        // Проверяем текущую выбранную дату
         if (form.value.date) {
           validateDate()
         }
@@ -330,7 +328,7 @@ export default {
       }
     }
 
-    // Проверка доступности даты
+    // Проверка доступности даты в БД
     const isDateAvailable = (date) => {
       if (allDatesAllowed.value) return true
       if (!date) return false
@@ -344,6 +342,27 @@ export default {
         return
       }
 
+      const today = new Date().toISOString().split('T')[0]
+
+      // Проверка на будущую дату
+      if (form.value.date > today) {
+        dateError.value = 'Нельзя выбрать дату в будущем'
+        return
+      }
+
+      // Для BYN все даты доступны
+      if (allDatesAllowed.value) {
+        dateError.value = ''
+        return
+      }
+
+      // Если сегодня нет курса (выходной), но выбрана сегодняшняя дата - разрешаем
+      if (form.value.date === today && !isDateAvailable(today)) {
+        dateError.value = ''
+        return
+      }
+
+      // Проверяем, есть ли курс на выбранную дату
       if (!isDateAvailable(form.value.date)) {
         dateError.value = `На дату ${form.value.date} нет курса для выбранной валюты.`
       } else {
@@ -351,34 +370,20 @@ export default {
       }
     }
 
-    // Доступна ли сегодняшняя дата
-    const isTodayUnavailable = computed(() => {
-      const today = new Date().toISOString().split('T')[0]
-      return !isDateAvailable(today) && !allDatesAllowed.value
-    })
-
     // Установка сегодняшней даты
     const setTodayDate = () => {
       const today = new Date().toISOString().split('T')[0]
-      if (isDateAvailable(today) || allDatesAllowed.value) {
-        form.value.date = today
-        dateError.value = ''
-      }
+      form.value.date = today
+      dateError.value = ''
+      validateDate()
     }
 
-    // Подсказка по доступным датам
-    const availableDatesHint = computed(() => {
-      if (allDatesAllowed.value) return ''
-      if (availableDates.value.length === 0) return 'Нет доступных дат'
-      if (availableDates.value.length > 10) {
-        return `${availableDates.value[0]} ... ${availableDates.value[availableDates.value.length - 1]} (${availableDates.value.length} дат)`
-      }
-      return availableDates.value.join(', ')
-    })
-
-    // Блокировка даты в календаре через атрибут
+    // Визуальная блокировка даты (для стилей)
     const isDateUnavailable = computed(() => {
-      return !allDatesAllowed.value && !isDateAvailable(form.value.date) && form.value.date !== ''
+      const today = new Date().toISOString().split('T')[0]
+      if (form.value.date === today) return false
+      if (allDatesAllowed.value) return false
+      return !isDateAvailable(form.value.date) && form.value.date !== ''
     })
 
     // Выбор валюты
@@ -483,15 +488,33 @@ export default {
       }
     }
 
+    // Правильное округление до 2 знаков
+    const roundToTwoDecimals = (value) => {
+      const num = parseFloat(value)
+      if (isNaN(num)) return 0
+      return parseFloat(num.toFixed(2))
+    }
+
     const submitTransaction = async () => {
       if (!isFormValid.value) return
+
+      // Проверка на будущую дату
+      const today = new Date().toISOString().split('T')[0]
+      if (form.value.date > today) {
+        error.value = 'Нельзя создать транзакцию на будущую дату'
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
 
       try {
         loading.value = true
         error.value = ''
 
+        // Округляем сумму до 2 знаков после запятой
+        const roundedAmount = roundToTwoDecimals(form.value.amount)
+
         const transactionData = {
-          amount: parseFloat(form.value.amount),
+          amount: roundedAmount,
           type: form.value.type,
           category_ids: form.value.category_ids,
           currency_id: form.value.currency_id,
@@ -559,9 +582,7 @@ export default {
       minDate,
       maxDate,
       isDateUnavailable,
-      isTodayUnavailable,
-      setTodayDate,
-      availableDatesHint
+      setTodayDate
     }
   }
 }

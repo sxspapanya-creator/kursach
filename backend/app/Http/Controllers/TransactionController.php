@@ -175,25 +175,34 @@ class TransactionController extends Controller
                 ], 422);
             }
 
-            // === ВАЛИДАЦИЯ НАЛИЧИЯ КУРСА НА ДАТУ ===
+            // Получаем выбранную валюту
             $currency = Currency::find($validated['currency_id']);
+            $byn = Currency::where('code', 'BYN')->first();
 
-            // Для BYN всегда есть курс (1), пропускаем проверку
+            // Для BYN пропускаем проверку курса
             if ($currency->code !== 'BYN') {
-                $byn = Currency::where('code', 'BYN')->first();
-
-                // Проверяем, есть ли курс на указанную дату
-                $hasRate = CurrencyRate::where('from_currency_id', $currency->id)
+                // Пытаемся найти курс на указанную дату
+                $rate = CurrencyRate::where('from_currency_id', $validated['currency_id'])
                     ->where('to_currency_id', $byn->id)
                     ->where('date', $validated['date'])
-                    ->exists();
+                    ->first();
 
-                if (!$hasRate) {
+                // Если нет курса на точную дату, берем ближайший предыдущий
+                if (!$rate) {
+                    $rate = CurrencyRate::where('from_currency_id', $validated['currency_id'])
+                        ->where('to_currency_id', $byn->id)
+                        ->where('date', '<=', $validated['date'])
+                        ->orderBy('date', 'desc')
+                        ->first();
+                }
+
+                // Если всё равно нет курса - возвращаем ошибку
+                if (!$rate) {
                     return response()->json([
                         'status' => 'error',
                         'message' => 'Validation failed',
                         'errors' => [
-                            'date' => ["На дату {$validated['date']} нет курса для валюты {$currency->code}. Выберите другую дату."]
+                            'date' => ["На дату {$validated['date']} нет курса для валюты {$currency->code}. Транзакция не может быть создана."]
                         ]
                     ], 422);
                 }

@@ -92,6 +92,13 @@ class CurrencyController extends Controller
 
             $currency = Currency::find($currencyId);
 
+            if (!$currency) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Currency not found'
+                ], 404);
+            }
+
             if ($currency->code === 'BYN') {
                 // Для BYN доступны все даты
                 return response()->json([
@@ -105,9 +112,19 @@ class CurrencyController extends Controller
 
             $byn = Currency::where('code', 'BYN')->first();
 
-            // Получаем все даты, для которых есть курс
+            if (!$byn) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Base currency BYN not found'
+                ], 500);
+            }
+
+            $today = now()->toDateString();
+
+            // Получаем все даты, для которых есть курс (только прошедшие и сегодня)
             $dates = CurrencyRate::where('from_currency_id', $currencyId)
                 ->where('to_currency_id', $byn->id)
+                ->where('date', '<=', $today)
                 ->select('date')
                 ->distinct()
                 ->orderBy('date', 'asc')
@@ -121,7 +138,8 @@ class CurrencyController extends Controller
                 'status' => 'success',
                 'data' => [
                     'available_dates' => $dates,
-                    'all_dates_allowed' => false
+                    'all_dates_allowed' => false,
+                    'today' => $today
                 ]
             ]);
 

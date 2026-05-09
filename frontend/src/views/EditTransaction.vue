@@ -93,7 +93,7 @@
             <div class="amount-input-wrapper">
               <div class="amount-input">
                 <input
-                    v-model.number="form.amount"
+                    v-model="form.amount"
                     type="number"
                     step="0.01"
                     min="0.01"
@@ -321,6 +321,12 @@ export default {
       payment_method: 'card'
     })
 
+    const roundToTwoDecimals = (value) => {
+      const num = parseFloat(value)
+      if (isNaN(num)) return 0
+      return parseFloat(num.toFixed(2))
+    }
+
     // Установка минимальной и максимальной даты (последние 6 месяцев)
     const setDateRange = () => {
       const today = new Date()
@@ -332,7 +338,10 @@ export default {
 
     // Получение доступных дат для выбранной валюты
     const fetchAvailableDates = async (currencyId) => {
-      if (!currencyId) return
+      if (!currencyId) {
+        console.warn('fetchAvailableDates called without currencyId')
+        return
+      }
 
       try {
         const response = await axios.get('/api/currencies/available-dates', {
@@ -364,6 +373,23 @@ export default {
         return
       }
 
+      const today = new Date().toISOString().split('T')[0]
+
+      if (form.value.date > today) {
+        dateError.value = 'Нельзя выбрать дату в будущем'
+        return
+      }
+
+      if (allDatesAllowed.value) {
+        dateError.value = ''
+        return
+      }
+
+      if (form.value.date === today && !isDateAvailable(today)) {
+        dateError.value = ''
+        return
+      }
+
       if (!isDateAvailable(form.value.date)) {
         dateError.value = `На дату ${form.value.date} нет курса для выбранной валюты.`
       } else {
@@ -373,17 +399,15 @@ export default {
 
     // Доступна ли сегодняшняя дата
     const isTodayUnavailable = computed(() => {
-      const today = new Date().toISOString().split('T')[0]
-      return !isDateAvailable(today) && !allDatesAllowed.value
+      return false
     })
 
     // Установка сегодняшней даты
     const setTodayDate = () => {
       const today = new Date().toISOString().split('T')[0]
-      if (isDateAvailable(today) || allDatesAllowed.value) {
-        form.value.date = today
-        dateError.value = ''
-      }
+      form.value.date = today
+      dateError.value = ''
+      validateDate()
     }
 
     // Подсказка по доступным датам
@@ -398,13 +422,15 @@ export default {
 
     // Блокировка даты в календаре через атрибут
     const isDateUnavailable = computed(() => {
-      return !allDatesAllowed.value && !isDateAvailable(form.value.date) && form.value.date !== ''
+      const today = new Date().toISOString().split('T')[0]
+      if (form.value.date === today) return false
+      if (allDatesAllowed.value) return false
+      return !isDateAvailable(form.value.date) && form.value.date !== ''
     })
 
     // Выбор валюты
     const selectCurrency = (currency) => {
       form.value.currency_id = currency.id
-      fetchAvailableDates(currency.id)
     }
 
     // Текущая выбранная валюта
@@ -493,10 +519,6 @@ export default {
         let categoryIds = []
         if (transactionData.categories && Array.isArray(transactionData.categories)) {
           categoryIds = transactionData.categories.map(cat => cat.id)
-        } else if (transactionData.category_id) {
-          categoryIds = [transactionData.category_id]
-        } else if (transactionData.category && transactionData.category.id) {
-          categoryIds = [transactionData.category.id]
         }
 
         form.value.amount = transactionData.amount || ''
@@ -506,10 +528,6 @@ export default {
         form.value.description = transactionData.description || ''
         form.value.date = formattedDate
         form.value.payment_method = transactionData.payment_method || 'card'
-
-        if (form.value.currency_id) {
-          await fetchAvailableDates(form.value.currency_id)
-        }
 
         console.log('Data loaded. Category IDs:', form.value.category_ids)
 
@@ -530,7 +548,6 @@ export default {
       } else {
         form.value.category_ids.splice(index, 1)
       }
-      console.log('Toggled category. New IDs:', form.value.category_ids)
     }
 
     const validateAmount = () => {
@@ -547,14 +564,22 @@ export default {
     const updateTransaction = async () => {
       if (!isFormValid.value) return
 
+      const today = new Date().toISOString().split('T')[0]
+      if (form.value.date > today) {
+        error.value = 'Нельзя создать транзакцию на будущую дату'
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
+
       try {
         submitting.value = true
         error.value = ''
 
         const transactionId = props.id || route.params.id
+        const roundedAmount = roundToTwoDecimals(form.value.amount)
 
         const transactionData = {
-          amount: parseFloat(form.value.amount),
+          amount: roundedAmount,
           type: form.value.type,
           category_ids: form.value.category_ids,
           currency_id: form.value.currency_id,
@@ -598,7 +623,7 @@ export default {
       if (newVal && newVal !== oldVal) {
         fetchAvailableDates(newVal)
       }
-    })
+    }, { immediate: true })
 
     return {
       form,
