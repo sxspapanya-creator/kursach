@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Transaction;
 use App\Models\Category;
+use App\Models\Currency;
+use App\Models\CurrencyRate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
@@ -31,32 +33,224 @@ class AnalyticsController extends Controller
             $year = $validated['year'] ?? date('Y');
             $month = $validated['month'] ?? date('m');
 
-            $baseData = $this->getBaseAnalytics($year, $month, $period, $userId);
-            $categorySpending = $this->getCategorySpendingWithAnalysis($year, $month, $userId);
-            $largestTransactions = $this->getLargestTransactions($year, $month, $userId);
-            $financialHealth = $this->calculateFinancialHealth(
-                $baseData['totals']['balance'] ?? 0,
-                $baseData['totals']['savings_rate'] ?? 0
-            );
+            $startDate = null;
+            $endDate = null;
+
+            switch ($period) {
+                case 'week':
+                    $startDate = Carbon::now()->subDays(6);
+                    $endDate = Carbon::now();
+                    break;
+                case 'year':
+                    $startDate = Carbon::create($year, 1, 1)->startOfYear();
+                    $endDate = Carbon::create($year, 12, 31)->endOfYear();
+                    break;
+                default:
+                    $startDate = Carbon::create($year, $month, 1)->startOfMonth();
+                    $endDate = $startDate->copy()->endOfMonth();
+                    break;
+            }
+
+            // Получаем транзакции с категориями и валютой
+            $transactions = Transaction::where('user_id', $userId)
+                ->with(['categories', 'currency'])
+                ->whereBetween('date', [$startDate, $endDate])
+                ->get();
+
+            $byn = Currency::where('code', 'BYN')->first();
+
+            // ========== КЛЮЧЕВОЕ: добавляем amount_in_byn к каждой транзакции (как в TransactionController@index) ==========
+            $transactionsWithRates = $transactions->map(function ($transaction) use ($byn) {
+                if ($transaction->currency_id && $byn && $transaction->currency_id != $byn->id) {
+                    // Ищем курс на дату транзакции или ближайший предыдущий
+                    $rate = CurrencyRate::where('from_currency_id', $transaction->currency_id)
+                        ->where('to_currency_id', $byn->id)
+                        ->where('date', '<=', $transaction->date)
+                        ->orderBy('date', 'desc')
+                        ->first();
+
+                    $transaction->exchange_rate = $rate ? $rate->rate : null;
+                    $transaction->amount_in_byn = $rate ? $transaction->amount * $rate->rate : $transaction->amount;
+                } else {
+                    $transaction->exchange_rate = 1;
+                    $transaction->amount_in_byn = $transaction->amount;
+                }
+                return $transaction;
+            });
+
+            // Считаем суммы используя amount_in_byn
+            $totalIncome = 0;
+            $totalExpense = 0;
+            $categoryTotals = [];
+
+            foreach ($transactionsWithRates as $transaction) {
+                $amountInByn = $transaction->amount_in_byn;
+
+                if ($transaction->type === 'income') {
+                    $totalIncome += $amountInByn;
+                } else {
+                    $totalExpense += $amountInByn;
+
+                    // Группируем по категориям
+                    foreach ($transaction->categories as $category) {
+                        $catId = $category->id;
+                        if (!isset($categoryTotals[$catId])) {
+                            $categoryTotals[$catId] = [
+                                'id' => $catId,
+                                'name' => $category->name,
+                                'color' => $category->color ?? '#3498db',
+                                'total' => 0,
+                                'budget_limit' => $category->budget_limit ?? 0
+                            ];
+                        }
+                        $categoryTotals[$catId]['total'] += $amountInByn;
+                    }
+                }
+            }
+
+            $balance = $totalIncome - $totalExpense;
+            $savingsRate = $totalIncome > 0 ? ($balance / $totalIncome) * 100 : 0;
+
+            // Формируем результат по категориям
+            $categorySpending = [];
+            foreach ($categoryTotals as $cat) {
+                $limitPercentage = 0;
+                $budgetStatus = 'no_limit';
+
+                if ($cat['budget_limit'] > 0) {
+                    $limitPercentage = ($cat['total'] / $cat['budget_limit']) * 100;
+                    if ($limitPercentage <= 80) {
+                        $budgetStatus = 'good';
+                    } elseif ($limitPercentage <= 100) {
+                        $budgetStatus = 'warning';
+                    } else {
+                        $budgetStatus = 'critical';
+                    }
+                }
+
+                $categorySpending[] = [
+                    'id' => $cat['id'],
+                    'name' => $cat['name'],
+                    'color' => $cat['color'],
+                    'total' => round($cat['total'], 2),
+                    'budget_limit' => (float) $cat['budget_limit'],
+                    'limit_percentage' => round($limitPercentage, 1),
+                    'budget_status' => $budgetStatus,
+                    'average_monthly' => round($cat['total'], 2)
+                ];
+            }
+
+            // Сортируем по сумме (убывание)
+            usort($categorySpending, function($a, $b) {
+                return $b['total'] <=> $a['total'];
+            });
+
+            $financialHealth = $this->calculateFinancialHealth($balance, $savingsRate);
 
             return response()->json([
                 'status' => 'success',
                 'data' => [
-                    'totals' => $baseData['totals'] ?? [],
-                    'date_range' => $baseData['date_range'] ?? [],
+                    'totals' => [
+                        'income' => round($totalIncome, 2),
+                        'expenses' => round($totalExpense, 2),
+                        'balance' => round($balance, 2),
+                        'savings_rate' => round($savingsRate, 1)
+                    ],
+                    'date_range' => [
+                        'start' => $startDate->format('Y-m-d'),
+                        'end' => $endDate->format('Y-m-d'),
+                        'label' => $startDate->translatedFormat('F Y')
+                    ],
                     'category_spending' => $categorySpending,
-                    'largest_transactions' => $largestTransactions,
                     'financial_health' => $financialHealth
                 ]
             ]);
+
         } catch (\Exception $e) {
-            return response()->json(['status' => 'error', 'message' => 'Ошибка: ' . $e->getMessage()], 200);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Ошибка: ' . $e->getMessage()
+            ], 500);
         }
     }
 
-    /**
-     * Расчет финансового здоровья
-     */
+    public function monthlyTrends(Request $request)
+    {
+        try {
+            $userId = $this->getUserId();
+            $months = $request->input('months', 12);
+
+            $endDate = Carbon::now()->endOfMonth();
+            $startDate = $endDate->copy()->subMonths($months)->startOfMonth();
+
+            $transactions = Transaction::where('user_id', $userId)
+                ->whereBetween('date', [$startDate, $endDate])
+                ->get();
+
+            $byn = Currency::where('code', 'BYN')->first();
+
+            $monthlyData = [];
+
+            foreach ($transactions as $transaction) {
+                // Вычисляем amount_in_byn (как в TransactionController)
+                if ($transaction->currency_id && $byn && $transaction->currency_id != $byn->id) {
+                    $rate = CurrencyRate::where('from_currency_id', $transaction->currency_id)
+                        ->where('to_currency_id', $byn->id)
+                        ->where('date', '<=', $transaction->date)
+                        ->orderBy('date', 'desc')
+                        ->first();
+                    $amountInByn = $rate ? $transaction->amount * $rate->rate : $transaction->amount;
+                } else {
+                    $amountInByn = $transaction->amount;
+                }
+
+                $date = Carbon::parse($transaction->date);
+                $monthKey = $date->format('Y-m');
+
+                if (!isset($monthlyData[$monthKey])) {
+                    $monthlyData[$monthKey] = [
+                        'month' => $monthKey,
+                        'income' => 0,
+                        'expense' => 0,
+                        'balance' => 0
+                    ];
+                }
+
+                if ($transaction->type === 'income') {
+                    $monthlyData[$monthKey]['income'] += $amountInByn;
+                } else {
+                    $monthlyData[$monthKey]['expense'] += $amountInByn;
+                }
+            }
+
+            // Сортируем по дате
+            ksort($monthlyData);
+
+            $result = [];
+            foreach ($monthlyData as $data) {
+                $result[] = [
+                    'month' => $data['month'],
+                    'income' => round($data['income'], 2),
+                    'expense' => round($data['expense'], 2),
+                    'balance' => round($data['income'] - $data['expense'], 2)
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $result
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Monthly trends error: ' . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Ошибка при получении трендов',
+                'data' => []
+            ], 500);
+        }
+    }
+
     private function calculateFinancialHealth($balance, $savingsRate)
     {
         try {
@@ -114,178 +308,6 @@ class AnalyticsController extends Controller
                 'status_label' => 'Не определено',
                 'color' => '#95a5a6'
             ];
-        }
-    }
-
-    private function getBaseAnalytics($year, $month, $period = 'month', $userId = null)
-    {
-        if (!$userId) $userId = $this->getUserId();
-
-        $startDate = null;
-        $endDate = null;
-
-        switch ($period) {
-            case 'week':
-                $startDate = Carbon::now()->subDays(6);
-                $endDate = Carbon::now();
-                break;
-            case 'year':
-                $startDate = Carbon::create($year, 1, 1)->startOfYear();
-                $endDate = Carbon::create($year, 12, 31)->endOfYear();
-                break;
-            default:
-                $startDate = Carbon::create($year, $month, 1)->startOfMonth();
-                $endDate = $startDate->copy()->endOfMonth();
-                break;
-        }
-
-        $transactions = Transaction::where('user_id', $userId)
-            ->whereBetween('date', [$startDate, $endDate])
-            ->selectRaw('SUM(CASE WHEN type = "income" THEN amount ELSE 0 END) as total_income')
-            ->selectRaw('SUM(CASE WHEN type = "expense" THEN amount ELSE 0 END) as total_expense')
-            ->first();
-
-        $totalIncome = $transactions->total_income ?? 0;
-        $totalExpense = $transactions->total_expense ?? 0;
-        $balance = $totalIncome - $totalExpense;
-        $savingsRate = $totalIncome > 0 ? ($balance / $totalIncome) * 100 : 0;
-
-        return [
-            'totals' => [
-                'income' => (float) $totalIncome,
-                'expenses' => (float) $totalExpense,
-                'balance' => (float) $balance,
-                'savings_rate' => (float) $savingsRate,
-            ],
-            'date_range' => [
-                'start' => $startDate->format('Y-m-d'),
-                'end' => $endDate->format('Y-m-d'),
-                'label' => $startDate->translatedFormat('F Y')
-            ]
-        ];
-    }
-
-    private function getCategorySpendingWithAnalysis($year, $month, $userId = null)
-    {
-        try {
-            if (!$userId) $userId = $this->getUserId();
-            $startDate = Carbon::create($year, $month, 1)->startOfMonth();
-            $endDate = $startDate->copy()->endOfMonth();
-
-            return Category::where('user_id', $userId)
-                ->where('type', 'expense')
-                ->with(['transactions' => function($query) use ($startDate, $endDate, $userId) {
-                    $query->where('user_id', $userId)
-                        ->where('type', 'expense')
-                        ->whereBetween('date', [$startDate, $endDate]);
-                }])
-                ->get()
-                ->map(function($category) {
-                    $total = $category->transactions->sum('amount');
-                    return [
-                        'id' => $category->id,
-                        'name' => $category->name,
-                        'color' => $category->color ?? '#3498db',
-                        'total' => $total,
-                        'budget_limit' => $category->budget_limit ?? 0,
-                        'limit_percentage' => $category->budget_limit > 0 ? ($total / $category->budget_limit) * 100 : 0,
-                        'budget_status' => 'no_limit',
-                        'average_monthly' => 0
-                    ];
-                })
-                ->filter(fn($cat) => $cat['total'] > 0)
-                ->sortByDesc('total')
-                ->values()
-                ->toArray();
-        } catch (\Exception $e) {
-            return [];
-        }
-    }
-
-    /**
-     * Получение помесячных трендов для дашборда
-     */
-    public function monthlyTrends(Request $request)
-    {
-        try {
-            $userId = $this->getUserId();
-            $months = $request->input('months', 12);
-
-            $endDate = Carbon::now()->endOfMonth();
-            $startDate = $endDate->copy()->subMonths($months)->startOfMonth();
-
-            $trends = Transaction::where('user_id', $userId)
-                ->whereBetween('date', [$startDate, $endDate])
-                ->selectRaw('YEAR(date) as year, MONTH(date) as month')
-                ->selectRaw('SUM(CASE WHEN type = "income" THEN amount ELSE 0 END) as income')
-                ->selectRaw('SUM(CASE WHEN type = "expense" THEN amount ELSE 0 END) as expense')
-                ->groupBy('year', 'month')
-                ->orderBy('year', 'asc')
-                ->orderBy('month', 'asc')
-                ->get()
-                ->map(function($item) {
-                    return [
-                        'month' => $item->year . '-' . str_pad($item->month, 2, '0', STR_PAD_LEFT),
-                        'income' => (float) ($item->income ?? 0),
-                        'expense' => (float) ($item->expense ?? 0),
-                        'balance' => (float) (($item->income ?? 0) - ($item->expense ?? 0))
-                    ];
-                });
-
-            return response()->json([
-                'status' => 'success',
-                'data' => $trends
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Ошибка при получении трендов',
-                'data' => []
-            ], 500);
-        }
-    }
-
-    private function getLargestTransactions($year, $month, $userId = null)
-    {
-        try {
-            if (!$userId) $userId = $this->getUserId();
-            $startDate = Carbon::create($year, $month, 1)->startOfMonth();
-            $endDate = $startDate->copy()->endOfMonth();
-
-            return [
-                'expenses' => Transaction::where('user_id', $userId)
-                    ->with('category')
-                    ->whereBetween('date', [$startDate, $endDate])
-                    ->where('type', 'expense')
-                    ->orderBy('amount', 'desc')
-                    ->limit(5)
-                    ->get()
-                    ->map(fn($t) => [
-                        'id' => $t->id,
-                        'description' => $t->description ?? 'Без описания',
-                        'amount' => $t->amount,
-                        'date' => $t->date->format('d.m.Y'),
-                        'category' => $t->category->name ?? 'Без категории',
-                        'category_color' => $t->category->color ?? '#95a5a6'
-                    ]),
-                'incomes' => Transaction::where('user_id', $userId)
-                    ->with('category')
-                    ->whereBetween('date', [$startDate, $endDate])
-                    ->where('type', 'income')
-                    ->orderBy('amount', 'desc')
-                    ->limit(5)
-                    ->get()
-                    ->map(fn($t) => [
-                        'id' => $t->id,
-                        'description' => $t->description ?? 'Без описания',
-                        'amount' => $t->amount,
-                        'date' => $t->date->format('d.m.Y'),
-                        'category' => $t->category->name ?? 'Без категории',
-                        'category_color' => $t->category->color ?? '#95a5a6'
-                    ])
-            ];
-        } catch (\Exception $e) {
-            return ['expenses' => [], 'incomes' => []];
         }
     }
 }
