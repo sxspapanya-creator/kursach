@@ -23,6 +23,7 @@ class DatabaseSeeder extends Seeder
         // Запускаем seeder для тестовых данных аналитики
         $this->call([
             AnalyticsTestDataSeeder::class,
+            PlansSeeder::class
         ]);
     }
 }

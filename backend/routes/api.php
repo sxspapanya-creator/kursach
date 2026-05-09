@@ -1,9 +1,11 @@
 <?php
 
 use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\PlanController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\AnalyticsController;
+use App\Http\Middleware\UserPermissionMiddleware;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CurrencyController;
@@ -37,16 +39,22 @@ Route::put('/transactions/{id}', [TransactionController::class, 'update']);
 Route::delete('/transactions/{id}', [TransactionController::class, 'destroy']);
 Route::post('/transactions/mass-delete', [TransactionController::class, 'massDelete']);
 
-// Аналитика
-Route::get('/analytics/overview', [AnalyticsController::class, 'overview']);
-Route::get('/analytics/category-spending', [AnalyticsController::class, 'categorySpending']);
-Route::get('/analytics/monthly-trends', [AnalyticsController::class, 'monthlyTrends']);
-Route::get('/analytics/category-comparison', [AnalyticsController::class, 'categoryComparison']);
-Route::get('/analytics/budget-progress', [AnalyticsController::class, 'budgetProgress']);
-Route::get('/analytics/financial-health', [AnalyticsController::class, 'financialHealth']);
+Route::group(['middleware' => [UserPermissionMiddleware::class]], function () {
+    // Аналитика
+    Route::get('/analytics/overview', [AnalyticsController::class, 'overview']);
+    Route::get('/analytics/category-spending', [AnalyticsController::class, 'categorySpending']);
+    Route::get('/analytics/monthly-trends', [AnalyticsController::class, 'monthlyTrends']);
+    Route::get('/analytics/category-comparison', [AnalyticsController::class, 'categoryComparison']);
+    Route::get('/analytics/budget-progress', [AnalyticsController::class, 'budgetProgress']);
+    Route::get('/analytics/financial-health', [AnalyticsController::class, 'financialHealth']);
+});
 
 Route::get('/currencies', [CurrencyController::class, 'index']);
 Route::get('/currencies/available-dates', [CurrencyController::class, 'getAvailableDates']);
+
+Route::get('/plans', [PlanController::class, 'index']);
+Route::get('/plans/types', [PlanController::class, 'getPlanTypes']);
+Route::post('/plans/set-plan', [PlanController::class, 'setPlanToUser']);
 
 // Fallback
 Route::fallback(function () {
