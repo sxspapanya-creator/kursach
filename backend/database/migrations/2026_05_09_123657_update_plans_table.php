@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('code', 10);
             $table->string('type', 25);
             $table->decimal('price')->default(0);
-            $table->unique('code', 'type');
+            $table->unique(['code', 'type']);
         });
 
         Schema::table('users', function (Blueprint $table) {
