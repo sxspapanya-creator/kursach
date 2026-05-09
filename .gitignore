@@ -12,10 +12,10 @@ Thumbs.db
 # Laravel
 backend/.env
 backend/vendor/
-backend/storage/framework/cache/
-backend/storage/framework/views/
+backend/storage/framework/cache/*
+backend/storage/framework/views/*
 backend/storage/logs/laravel.log
-backend/bootstrap/cache/
+backend/bootstrap/cache/*
 backend/public/storage
 backend/public/hot
 *.log
