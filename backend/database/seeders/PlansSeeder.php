@@ -22,7 +22,7 @@ class PlansSeeder extends Seeder
             'description' => 'Бесплатный тариф',
             'price_monthly' => 0,
             'price_yearly' => 0,
-            'currency_id' => Currency::first(),
+            'currency_id' => Currency::first()->id,
             'code' => PlanCodeEnum::FREE,
         ]);
 
@@ -31,7 +31,7 @@ class PlansSeeder extends Seeder
             'description' => 'Премиум тариф',
             'price_monthly' => 15,
             'price_yearly' => 120,
-            'currency_id' => Currency::first(),
+            'currency_id' => Currency::first()->id,
             'code' => PlanCodeEnum::FREE,
         ]);
     }
