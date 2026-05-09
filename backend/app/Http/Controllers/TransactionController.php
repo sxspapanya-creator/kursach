@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use App\Services\TransactionCategorizer;
 
 class TransactionController extends Controller
 {
@@ -513,6 +514,59 @@ class TransactionController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to delete transactions: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Предложить категорию для транзакции на основе описания
+     */
+    public function suggestCategory(Request $request)
+    {
+        try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $validated = $request->validate([
+                'description' => 'required|string|min:3',
+                'type' => 'nullable|in:income,expense'
+            ]);
+
+            $categorizer = new TransactionCategorizer($userId);
+            $suggestion = $categorizer->suggest(
+                $validated['description'],
+                $validated['type'] ?? null
+            );
+
+            if ($suggestion) {
+                $category = Category::find($suggestion['category_id']);
+                if ($category && $category->user_id == $userId) {
+                    return response()->json([
+                        'status' => 'success',
+                        'data' => [
+                            'category_id' => $category->id,
+                            'category_name' => $category->name,
+                            'category_type' => $category->type,
+                            'confidence' => $suggestion['confidence']
+                        ]
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'data' => null
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to suggest category: ' . $e->getMessage()
             ], 500);
         }
     }

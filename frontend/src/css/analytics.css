@@ -1681,4 +1681,68 @@
     .trend-summary {
         padding: 1rem;
     }
+
+
+    .budget-methods-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 2rem;
+        padding: 1rem;
+        background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+        border-radius: 16px;
+        border: 1px solid #e2e8f0;
+    }
+
+    .method-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.6rem 1.2rem;
+        border: none;
+        border-radius: 10px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .method-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .method-503020 { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
+    .method-503020:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4); }
+
+    .method-6040 { background: linear-gradient(135deg, #10b981, #059669); color: white; }
+    .method-6040:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4); }
+
+    .method-envelopes { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
+    .method-envelopes:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4); }
+
+    .method-metrics { background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; }
+    .method-metrics:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4); }
+
+    .method-icon { font-size: 1rem; }
+
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .modal-content {
+        background: white;
+        border-radius: 16px;
+        width: 90%;
+        max-width: 700px;
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+    }
 }

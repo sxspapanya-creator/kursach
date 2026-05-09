@@ -32,7 +32,7 @@ class PlansSeeder extends Seeder
             'price_monthly' => 15,
             'price_yearly' => 120,
             'currency_id' => Currency::first()->id,
-            'code' => PlanCodeEnum::FREE,
+            'code' => PlanCodeEnum::PREMIUM,
         ]);
     }
 }

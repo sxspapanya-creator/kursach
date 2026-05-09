@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\BudgetMethodController;
 use App\Http\Controllers\PlanController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\CategoryController;
@@ -38,23 +39,33 @@ Route::get('/transactions/{id}', [TransactionController::class, 'show']);
 Route::put('/transactions/{id}', [TransactionController::class, 'update']);
 Route::delete('/transactions/{id}', [TransactionController::class, 'destroy']);
 Route::post('/transactions/mass-delete', [TransactionController::class, 'massDelete']);
+Route::post('/transactions/suggest-category', [TransactionController::class, 'suggestCategory']);
 
 Route::group(['middleware' => [UserPermissionMiddleware::class]], function () {
     // Аналитика
     Route::get('/analytics/overview', [AnalyticsController::class, 'overview']);
-    Route::get('/analytics/category-spending', [AnalyticsController::class, 'categorySpending']);
     Route::get('/analytics/monthly-trends', [AnalyticsController::class, 'monthlyTrends']);
-    Route::get('/analytics/category-comparison', [AnalyticsController::class, 'categoryComparison']);
-    Route::get('/analytics/budget-progress', [AnalyticsController::class, 'budgetProgress']);
     Route::get('/analytics/financial-health', [AnalyticsController::class, 'financialHealth']);
+    Route::get('/analytics/rule-50-30-20', [AnalyticsController::class, 'rule503020']);
+    Route::get('/analytics/rule-60-40', [AnalyticsController::class, 'rule6040']);
+    Route::get('/analytics/four-envelopes', [AnalyticsController::class, 'fourEnvelopes']);
+    Route::get('/analytics/forecast-metrics', [AnalyticsController::class, 'forecastMetrics']);
 });
 
 Route::get('/currencies', [CurrencyController::class, 'index']);
 Route::get('/currencies/available-dates', [CurrencyController::class, 'getAvailableDates']);
 
+Route::get('/budget/four-envelopes', [BudgetMethodController::class, 'fourEnvelopes']);
+Route::get('/budget/forecast-metrics', [BudgetMethodController::class, 'forecastMetrics']);
 Route::get('/plans', [PlanController::class, 'index']);
 Route::get('/plans/types', [PlanController::class, 'getPlanTypes']);
 Route::post('/plans/set-plan', [PlanController::class, 'setPlanToUser']);
+
+// Методы бюджетирования
+Route::get('/budget/rule-50-30-20', [BudgetMethodController::class, 'rule503020']);
+Route::get('/budget/rule-60-40', [BudgetMethodController::class, 'rule6040']);
+Route::get('/budget/four-envelopes', [BudgetMethodController::class, 'fourEnvelopes']);
+Route::get('/budget/forecast-metrics', [BudgetMethodController::class, 'forecastMetrics']);
 
 // Fallback
 Route::fallback(function () {
