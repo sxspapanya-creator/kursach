@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enum\PlanCodeEnum;
+use App\Enum\PlanTypeEnum;
 use App\Models\Category;
 use App\Models\Plan;
 use App\Models\Transaction;
@@ -20,19 +21,28 @@ class PlansSeeder extends Seeder
         Plan::create([
             'name' => 'Бесплатный',
             'description' => 'Бесплатный тариф',
-            'price_monthly' => 0,
-            'price_yearly' => 0,
+            'price' => 0,
             'currency_id' => Currency::first()->id,
             'code' => PlanCodeEnum::FREE,
+            'type' => PlanTypeEnum::YEARLY,
         ]);
 
         Plan::create([
             'name' => 'Премиум',
             'description' => 'Премиум тариф',
-            'price_monthly' => 15,
-            'price_yearly' => 120,
+            'price' => 15,
             'currency_id' => Currency::first()->id,
             'code' => PlanCodeEnum::PREMIUM,
+            'type' => PlanTypeEnum::MONTHLY,
+        ]);
+
+        Plan::create([
+            'name' => 'Премиум',
+            'description' => 'Премиум тариф',
+            'price' => 120,
+            'currency_id' => Currency::first()->id,
+            'code' => PlanCodeEnum::PREMIUM,
+            'type' => PlanTypeEnum::YEARLY,
         ]);
     }
 }

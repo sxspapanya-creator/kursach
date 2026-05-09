@@ -12,7 +12,11 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('plans', function (Blueprint $table) {
-            $table->string('code', 10)->unique();
+            $table->dropColumn('price_monthly', 'price_yearly');
+            $table->string('code', 10);
+            $table->string('type', 25);
+            $table->decimal('price')->default(0);
+            $table->unique('code', 'type');
         });
 
         Schema::table('users', function (Blueprint $table) {
@@ -32,12 +36,18 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('plans', function (Blueprint $table) {
-            $table->dropColumn('code');
+        Schema::table('users', function (Blueprint $table) {
+            $table->dropForeign('users_plan_id_foreign');
+            $table->dropColumn('plan_id');
+            $table->dropColumn('plan_expires_at');
         });
 
-        Schema::table('users', function (Blueprint $table) {
-            $table->dropColumn('plan_id');
+        Schema::table('plans', function (Blueprint $table) {
+            $table->dropColumn('code');
+            $table->dropColumn('type');
+            $table->dropColumn('price');
+            $table->decimal('price_monthly')->default(0);
+            $table->decimal('price_yearly')->default(0);
         });
     }
 };

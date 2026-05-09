@@ -51,13 +51,12 @@ class UserPermissionMiddleware
                 'message' => 'User not found'
             ], Response::HTTP_UNAUTHORIZED);
         }
-
-//        if (!$user->plan || $user->plan->code !== PlanCodeEnum::PREMIUM) {
-//            return response()->json([
-//                'error' => 'user need premium plan',
-//                'status' => 'error'
-//            ], Response::HTTP_FORBIDDEN);
-//        }
+        if (!$user->plan || $user->plan->code !== PlanCodeEnum::PREMIUM->value) {
+            return response()->json([
+                'error' => 'user need premium plan',
+                'status' => 'error'
+            ], Response::HTTP_FORBIDDEN);
+        }
         return $next($request);
     }
 }
