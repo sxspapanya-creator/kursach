@@ -102,6 +102,7 @@
                     class="amount-field"
                     :class="{ 'error': amountError }"
                     @input="validateAmount"
+                    @blur="roundAmount"
                 />
                 <span class="currency-symbol">{{ currentCurrencySymbol }}</span>
               </div>
@@ -232,10 +233,6 @@
                     Сегодня
                   </button>
                 </div>
-                <div v-if="dateError" class="error-message">{{ dateError }}</div>
-                <div v-if="availableDatesHint" class="field-hint">
-                  ⚠️ Доступные даты: {{ availableDatesHint }}
-                </div>
               </div>
 
               <div class="form-group">
@@ -321,10 +318,18 @@ export default {
       payment_method: 'card'
     })
 
+    // Округление до 2 знаков после запятой
     const roundToTwoDecimals = (value) => {
       const num = parseFloat(value)
-      if (isNaN(num)) return 0
-      return parseFloat(num.toFixed(2))
+      if (isNaN(num)) return ''
+      return num.toFixed(2)
+    }
+
+    // Метод для округления при потере фокуса
+    const roundAmount = () => {
+      if (form.value.amount) {
+        form.value.amount = roundToTwoDecimals(form.value.amount)
+      }
     }
 
     // Установка минимальной и максимальной даты (последние 6 месяцев)
@@ -521,7 +526,12 @@ export default {
           categoryIds = transactionData.categories.map(cat => cat.id)
         }
 
-        form.value.amount = transactionData.amount || ''
+        // Округляем сумму до 2 знаков при загрузке
+        const roundedAmount = transactionData.amount
+            ? parseFloat(transactionData.amount).toFixed(2)
+            : ''
+
+        form.value.amount = roundedAmount
         form.value.type = transactionData.type || 'expense'
         form.value.category_ids = categoryIds
         form.value.currency_id = transactionData.currency_id || null
@@ -552,7 +562,7 @@ export default {
 
     const validateAmount = () => {
       const amount = parseFloat(form.value.amount)
-      if (amount < 0.01) {
+      if (isNaN(amount) || amount < 0.01) {
         amountError.value = 'Сумма должна быть больше 0'
       } else if (amount > 10000000) {
         amountError.value = 'Слишком большая сумма'
@@ -576,7 +586,9 @@ export default {
         error.value = ''
 
         const transactionId = props.id || route.params.id
-        const roundedAmount = roundToTwoDecimals(form.value.amount)
+
+        // Округляем сумму перед отправкой
+        const roundedAmount = parseFloat(form.value.amount).toFixed(2)
 
         const transactionData = {
           amount: roundedAmount,
@@ -641,6 +653,7 @@ export default {
       getCurrencyFlag,
       formatRate,
       validateAmount,
+      roundAmount,
       toggleCategory,
       fetchTransaction,
       updateTransaction,
@@ -924,33 +937,21 @@ export default {
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(59, 130, 246, 0.02) 100%);
 }
 
-.currency-info {
+.currency-flag {
+  font-size: 1.5rem;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  flex: 1;
-}
-
-.currency-details {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.currency-code {
-  font-weight: 700;
-  color: #1e293b;
-  font-size: 1rem;
+  justify-content: center;
 }
 
 .currency-name {
-  font-size: 0.75rem;
-  color: #64748b;
-}
-
-.currency-rate-info {
-  text-align: right;
-  margin-right: 0.5rem;
+  flex: 1;
+  font-weight: 500;
+  color: #1e293b;
+  font-size: 0.875rem;
+  margin-left: 0.5rem;
 }
 
 .currency-rate {
@@ -1008,15 +1009,15 @@ export default {
 
 .category-option {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
-  padding: 1rem;
+  padding: 0.75rem;
   border: 2px solid #e2e8f0;
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
-  min-height: 80px;
 }
 
 .category-option:hover {
@@ -1032,27 +1033,26 @@ export default {
 .category-info {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
+  flex: 1;
 }
 
 .category-color {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
   flex-shrink: 0;
 }
 
 .category-name {
-  font-weight: 600;
+  font-weight: 500;
   color: #1e293b;
   font-size: 0.875rem;
 }
 
 .category-check {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
   color: #3b82f6;
+  flex-shrink: 0;
 }
 
 /* Детали формы */
@@ -1261,9 +1261,26 @@ export default {
   line-height: 1.4;
 }
 
+/* Стили для недоступной даты */
+.date-input-wrapper input.date-disabled {
+  border-color: #ef4444;
+  background-color: #fef2f2;
+}
+
+.date-today:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  color: #f59e0b;
+  margin-top: 0.25rem;
+}
+
 /* Адаптивность */
 @media (max-width: 768px) {
-  .add-transaction {
+  .edit-transaction {
     padding: 0 1rem 1.5rem;
   }
 
@@ -1333,7 +1350,7 @@ export default {
 }
 
 @media (max-width: 480px) {
-  .add-transaction {
+  .edit-transaction {
     padding: 0 0.75rem 1rem;
   }
 
@@ -1349,12 +1366,8 @@ export default {
     padding: 0.75rem;
   }
 
-  .currency-code {
-    font-size: 0.875rem;
-  }
-
   .currency-name {
-    font-size: 0.7rem;
+    font-size: 0.75rem;
   }
 
   .currency-rate {
@@ -1368,58 +1381,5 @@ export default {
   .payment-methods {
     grid-template-columns: 1fr;
   }
-  .currency-option {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem;
-    border: 2px solid #e2e8f0;
-    border-radius: 12px;
-    cursor: pointer;
-    transition: all 0.2s;
-    position: relative;
-  }
-
-  .currency-flag {
-    font-size: 2rem;
-    width: 48px;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #f8fafc;
-    border-radius: 12px;
-  }
-
-  .currency-name {
-    flex: 1;
-    font-weight: 500;
-    color: #1e293b;
-    font-size: 1rem;
-  }
-
-  .currency-rate {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: #3b82f6;
-  }
-
-  /* Стили для недоступной даты */
-  .date-input-wrapper input.date-disabled {
-    border-color: #ef4444;
-    background-color: #fef2f2;
-  }
-
-  .date-today:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .field-hint {
-    font-size: 0.75rem;
-    color: #f59e0b;
-    margin-top: 0.25rem;
-  }
 }
-
 </style>

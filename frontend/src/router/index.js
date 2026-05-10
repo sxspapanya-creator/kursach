@@ -171,7 +171,6 @@ async function userHasPremiumPlan() {
 
 // Навигационный гард
 router.beforeEach(async (to, from, next) => {
-    console.log('=== НАВИГАЦИЯ ===')
     console.log('Откуда:', from.path)
     console.log('Куда:', to.path)
     console.log('Требует авторизации:', to.meta.requiresAuth)
@@ -183,14 +182,14 @@ router.beforeEach(async (to, from, next) => {
 
     // Если маршрут требует авторизации и пользователь не авторизован
     if (to.meta.requiresAuth && !isAuthenticated) {
-        console.log('❌ Редирект на /login - требуется авторизация')
+        console.log('Требуется авторизация')
         next('/login')
         return
     }
 
     // Если маршрут только для гостей и пользователь авторизован
     if (to.meta.requiresGuest && isAuthenticated) {
-        console.log('❌ Редирект на / - уже авторизован')
+        console.log('Уже авторизован')
         next('/')
         return
     }
@@ -204,7 +203,7 @@ router.beforeEach(async (to, from, next) => {
     }
 
     // Во всех остальных случаях разрешаем переход
-    console.log('✅ Разрешаю переход на:', to.path)
+    console.log('Разрешаю переход на:', to.path)
     next()
 })
 

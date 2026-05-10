@@ -4,7 +4,7 @@
     <div class="header">
       <h1>📊 Аналитика бюджета</h1>
       <div class="period-controls">
-        <select v-model="selectedPeriod" @change="fetchAnalytics">
+        <select v-model="selectedPeriod">
           <option value="month">Месяц</option>
           <option value="week">Неделя</option>
           <option value="year">Год</option>
@@ -29,10 +29,6 @@
       <button @click="calculateFourEnvelopes" :disabled="calcLoading" class="method-btn method-envelopes">
         <span class="method-icon">📬</span>
         4 конверта
-      </button>
-      <button @click="calculateForecastMetrics" :disabled="calcLoading" class="method-btn method-metrics">
-        <span class="method-icon">📈</span>
-        Качество прогнозов
       </button>
     </div>
 
@@ -59,12 +55,6 @@
       </div>
     </div>
 
-    <!-- Индикатор загрузки -->
-    <div v-if="loading" class="loading-overlay">
-      <div class="spinner"></div>
-      <p>Анализируем ваши финансы...</p>
-    </div>
-
     <!-- Основные метрики -->
     <div class="metrics-grid">
       <div class="metric-card health-card" :style="{ borderColor: financialHealth.color }">
@@ -83,7 +73,7 @@
         <div class="metric-icon">📈</div>
         <div class="metric-content">
           <h3>Доходы</h3>
-          <div class="metric-value">{{ formatMoney(analytics.totals?.income) }}</div>
+          <div class="metric-value">{{ formatMoney(processedTotals.income) }}</div>
           <div class="metric-label">{{ analytics.date_range?.label || 'За период' }}</div>
         </div>
       </div>
@@ -92,7 +82,7 @@
         <div class="metric-icon">📉</div>
         <div class="metric-content">
           <h3>Расходы</h3>
-          <div class="metric-value">{{ formatMoney(analytics.totals?.expenses) }}</div>
+          <div class="metric-value">{{ formatMoney(processedTotals.expenses) }}</div>
           <div class="metric-label">{{ analytics.date_range?.label || 'За период' }}</div>
         </div>
       </div>
@@ -101,7 +91,7 @@
         <div class="metric-icon">⚖️</div>
         <div class="metric-content">
           <h3>Баланс</h3>
-          <div class="metric-value">{{ formatMoney(analytics.totals?.balance) }}</div>
+          <div class="metric-value">{{ formatMoney(processedTotals.balance) }}</div>
           <div class="metric-label">чистый остаток</div>
         </div>
       </div>
@@ -110,10 +100,10 @@
         <div class="metric-icon">💰</div>
         <div class="metric-content">
           <h3>Норма сбережений</h3>
-          <div class="metric-value">{{ analytics.totals?.savings_rate?.toFixed(1) || '0' }}%</div>
+          <div class="metric-value">{{ processedTotals.savings_rate?.toFixed(1) || '0' }}%</div>
           <div class="metric-label">от дохода</div>
           <div class="savings-progress">
-            <div class="progress-bar" :style="{ width: Math.min(analytics.totals?.savings_rate || 0, 100) + '%' }"></div>
+            <div class="progress-bar" :style="{ width: Math.min(processedTotals.savings_rate || 0, 100) + '%' }"></div>
           </div>
         </div>
       </div>
@@ -148,10 +138,10 @@
     </div>
 
     <!-- Расходы по категориям -->
-    <div class="category-analysis" v-if="analytics.category_spending?.length">
+    <div class="category-analysis" v-if="processedCategorySpending.length">
       <div class="section-header">
         <h2>📋 Анализ расходов по категориям</h2>
-        <div class="total-summary">Всего расходов: <strong>{{ formatMoney(analytics.totals?.expenses || 0) }}</strong></div>
+        <div class="total-summary">Всего расходов: <strong>{{ formatMoney(processedTotals.expenses || 0) }}</strong></div>
       </div>
       <div class="analysis-vertical">
         <div class="pie-chart-section">
@@ -160,7 +150,7 @@
             <div class="pie-chart">
               <svg width="200" height="200" viewBox="0 0 200 200">
                 <circle cx="100" cy="100" r="80" fill="none" stroke="#f0f0f0" stroke-width="40" />
-                <g v-for="(category, index) in analytics.category_spending" :key="category.id">
+                <g v-for="(category, index) in processedCategorySpending" :key="category.id">
                   <circle cx="100" cy="100" r="80" fill="none"
                           :stroke="category.color || getCategoryColor(index)"
                           stroke-width="40"
@@ -168,18 +158,18 @@
                           :stroke-dashoffset="getDashOffset(category, index)"
                           class="pie-segment" />
                 </g>
-                <text x="100" y="95" text-anchor="middle" class="pie-center-text">{{ analytics.category_spending.length }}</text>
+                <text x="100" y="95" text-anchor="middle" class="pie-center-text">{{ processedCategorySpending.length }}</text>
                 <text x="100" y="115" text-anchor="middle" class="pie-center-subtext">категорий</text>
               </svg>
             </div>
             <div class="pie-legend">
-              <div v-for="(category, index) in analytics.category_spending.slice(0, 5)" :key="category.id" class="legend-item">
+              <div v-for="(category, index) in processedCategorySpending.slice(0, 5)" :key="category.id" class="legend-item">
                 <div class="legend-color" :style="{ backgroundColor: category.color || getCategoryColor(index) }"></div>
                 <div class="legend-text">
                   <span class="legend-name">{{ category.name }}</span>
-                  <span class="legend-value">{{ formatMoney(category.total) }}</span>
+                  <span class="legend-value">{{ formatMoney(category.total_in_byn || category.total) }}</span>
                 </div>
-                <div class="legend-percentage">{{ getCategoryPercentage(category.total) }}%</div>
+                <div class="legend-percentage">{{ getCategoryPercentage(category.total_in_byn || category.total) }}%</div>
               </div>
             </div>
           </div>
@@ -197,7 +187,7 @@
               </tr>
               </thead>
               <tbody>
-              <tr v-for="category in analytics.category_spending" :key="category.id">
+              <tr v-for="category in processedCategorySpending" :key="category.id">
                 <td class="col-category">
                   <div class="category-info">
                     <div class="category-color" :style="{ backgroundColor: category.color || '#3498db' }"></div>
@@ -205,7 +195,7 @@
                   </div>
                 </td>
                 <td class="col-amount">
-                  <div class="amount-value">{{ formatMoney(category.total) }}</div>
+                  <div class="amount-value">{{ formatMoney(category.total_in_byn || category.total) }}</div>
                 </td>
                 <td class="col-limit">
                   <span v-if="category.budget_limit" class="limit-value">{{ formatMoney(category.budget_limit) }}</span>
@@ -246,67 +236,231 @@ export default {
     const showResultModal = ref(false)
     const resultModal = ref({ icon: '', title: '', data: '' })
 
+    // Функция для получения суммы в BYN из объекта (транзакции или категории)
+    const getAmountInByn = (item) => {
+      if (!item) return 0
+
+      // Если уже есть amount_in_byn
+      if (item.amount_in_byn !== undefined && item.amount_in_byn !== null) {
+        return parseFloat(item.amount_in_byn) || 0
+      }
+
+      // Если есть total_in_byn (для категорий)
+      if (item.total_in_byn !== undefined && item.total_in_byn !== null) {
+        return parseFloat(item.total_in_byn) || 0
+      }
+
+      // Если есть total и exchange_rate
+      if (item.exchange_rate && item.total) {
+        return (parseFloat(item.total) || 0) * parseFloat(item.exchange_rate)
+      }
+
+      // Если есть amount и exchange_rate
+      if (item.exchange_rate && item.amount) {
+        return (parseFloat(item.amount) || 0) * parseFloat(item.exchange_rate)
+      }
+
+      // Если нет курса - считаем что это BYN
+      if (item.total !== undefined && item.total !== null) {
+        return parseFloat(item.total) || 0
+      }
+
+      if (item.amount !== undefined && item.amount !== null) {
+        return parseFloat(item.amount) || 0
+      }
+
+      return 0
+    }
+
+    // Обработанные итоги (пересчитанные в BYN)
+    const processedTotals = computed(() => {
+      const totals = analytics.value.totals || {}
+
+      let income = getAmountInByn(totals)
+      let expenses = 0
+      let balance = 0
+      let savings_rate = 0
+
+      // Если totals это объект с разными полями
+      if (totals.income !== undefined) {
+        income = getAmountInByn({ total: totals.income })
+      }
+      if (totals.expenses !== undefined) {
+        expenses = getAmountInByn({ total: totals.expenses })
+      }
+      if (totals.balance !== undefined) {
+        balance = getAmountInByn({ total: totals.balance })
+      } else {
+        balance = income - expenses
+      }
+      if (totals.savings_rate !== undefined) {
+        savings_rate = totals.savings_rate
+      } else if (income > 0) {
+        savings_rate = (balance / income) * 100
+      }
+
+      return { income, expenses, balance, savings_rate }
+    })
+
+    // Обработанные расходы по категориям (пересчитанные в BYN)
+    const processedCategorySpending = computed(() => {
+      const categories = analytics.value.category_spending || []
+
+      return categories.map(cat => {
+        const totalInByn = getAmountInByn(cat)
+
+        // Пересчитываем процент использования лимита
+        let limitPercentage = null
+        let budgetStatus = cat.budget_status
+
+        if (cat.budget_limit && cat.budget_limit > 0) {
+          const limitInByn = getAmountInByn({ total: cat.budget_limit })
+          limitPercentage = (totalInByn / limitInByn) * 100
+
+          if (budgetStatus === 'good' && limitPercentage > 80) budgetStatus = 'warning'
+          if (budgetStatus === 'warning' && limitPercentage > 100) budgetStatus = 'critical'
+        }
+
+        return {
+          ...cat,
+          total_in_byn: totalInByn,
+          total: totalInByn, // Переопределяем для совместимости
+          limit_percentage: limitPercentage,
+          budget_status: budgetStatus
+        }
+      }).sort((a, b) => (b.total_in_byn || 0) - (a.total_in_byn || 0))
+    })
+
+    // Обработанные распределения для лимитов
+    const expenseCategoriesDistribution = computed(() => {
+      const distribution = analytics.value.forecasts?.optimal_distribution || []
+      return distribution
+          .filter(item => item.category_name && !item.category_name.toLowerCase().includes('доход'))
+          .map(item => ({
+            ...item,
+            current_monthly_avg: getAmountInByn({ total: item.current_monthly_avg }),
+            recommended_limit: getAmountInByn({ total: item.recommended_limit })
+          }))
+    })
+
+    const financialHealth = computed(() => analytics.value.financial_health || {
+      score: 0,
+      status: 'poor',
+      status_label: 'Не определено',
+      color: '#95a5a6'
+    })
+
     const balanceClass = computed(() => {
-      const balance = analytics.value.totals?.balance || 0
+      const balance = processedTotals.value.balance
       if (balance > 0) return 'positive'
       if (balance < 0) return 'negative'
       return 'neutral'
     })
 
-    const financialHealth = computed(() => analytics.value.financial_health || { score: 0, status: 'poor', status_label: 'Не определено', color: '#95a5a6' })
-
-    const expenseCategoriesDistribution = computed(() => analytics.value.forecasts?.optimal_distribution?.filter(item => item.category_name && !item.category_name.toLowerCase().includes('доход')) || [])
-
     const calculate503020 = async () => {
       try {
         calcLoading.value = true
         const [year, month] = selectedDate.value.split('-')
-        const res = await axios.get('/api/budget/rule-50-30-20', { params: { month: parseInt(month), year: parseInt(year) }, credentials: 'include' })
-        resultModal.value = { icon: '📐', title: 'Правило 50/30/20', data: JSON.stringify(res.data.data, null, 2) }
+        const res = await axios.get('/api/budget/rule-50-30-20', {
+          params: { month: parseInt(month), year: parseInt(year) },
+          credentials: 'include'
+        })
+        // Конвертируем суммы в ответе в BYN для отображения
+        const data = res.data.data
+        if (data) {
+          if (data.income) data.income = getAmountInByn({ total: data.income })
+          if (data.needs) data.needs = getAmountInByn({ total: data.needs })
+          if (data.wants) data.wants = getAmountInByn({ total: data.wants })
+          if (data.savings) data.savings = getAmountInByn({ total: data.savings })
+        }
+        resultModal.value = {
+          icon: '📐',
+          title: 'Правило 50/30/20',
+          data: JSON.stringify(data, null, 2)
+        }
         showResultModal.value = true
-      } catch (err) { alert(err.response?.data?.message || 'Ошибка') }
-      finally { calcLoading.value = false }
+      } catch (err) {
+        alert(err.response?.data?.message || 'Ошибка')
+      } finally {
+        calcLoading.value = false
+      }
     }
 
     const calculate6040 = async () => {
       try {
         calcLoading.value = true
         const [year, month] = selectedDate.value.split('-')
-        const res = await axios.get('/api/budget/rule-60-40', { params: { month: parseInt(month), year: parseInt(year) }, credentials: 'include' })
-        resultModal.value = { icon: '⚖️', title: 'Метод 60/40', data: JSON.stringify(res.data.data, null, 2) }
+        const res = await axios.get('/api/budget/rule-60-40', {
+          params: { month: parseInt(month), year: parseInt(year) },
+          credentials: 'include'
+        })
+        const data = res.data.data
+        if (data) {
+          if (data.income) data.income = getAmountInByn({ total: data.income })
+          if (data.expenses) data.expenses = getAmountInByn({ total: data.expenses })
+          if (data.surplus) data.surplus = getAmountInByn({ total: data.surplus })
+        }
+        resultModal.value = {
+          icon: '⚖️',
+          title: 'Метод 60/40',
+          data: JSON.stringify(data, null, 2)
+        }
         showResultModal.value = true
-      } catch (err) { alert(err.response?.data?.message || 'Ошибка') }
-      finally { calcLoading.value = false }
+      } catch (err) {
+        alert(err.response?.data?.message || 'Ошибка')
+      } finally {
+        calcLoading.value = false
+      }
     }
 
     const calculateFourEnvelopes = async () => {
       try {
         calcLoading.value = true
         const [year, month] = selectedDate.value.split('-')
-        const res = await axios.get('/api/budget/four-envelopes', { params: { month: parseInt(month), year: parseInt(year) }, credentials: 'include' })
-        resultModal.value = { icon: '📬', title: 'Метод четырёх конвертов', data: JSON.stringify(res.data.data, null, 2) }
+        const res = await axios.get('/api/budget/four-envelopes', {
+          params: { month: parseInt(month), year: parseInt(year) },
+          credentials: 'include'
+        })
+        const data = res.data.data
+        if (data) {
+          if (data.total_income) data.total_income = getAmountInByn({ total: data.total_income })
+          if (data.envelopes) {
+            data.envelopes = data.envelopes.map(e => ({
+              ...e,
+              amount: getAmountInByn({ total: e.amount })
+            }))
+          }
+        }
+        resultModal.value = {
+          icon: '📬',
+          title: 'Метод четырёх конвертов',
+          data: JSON.stringify(data, null, 2)
+        }
         showResultModal.value = true
-      } catch (err) { alert(err.response?.data?.message || 'Ошибка') }
-      finally { calcLoading.value = false }
-    }
-
-    const calculateForecastMetrics = async () => {
-      try {
-        calcLoading.value = true
-        const res = await axios.get('/api/budget/forecast-metrics', { credentials: 'include' })
-        resultModal.value = { icon: '📈', title: 'Метрики качества прогнозов', data: JSON.stringify(res.data.data, null, 2) }
-        showResultModal.value = true
-      } catch (err) { alert(err.response?.data?.message || 'Ошибка') }
-      finally { calcLoading.value = false }
+      } catch (err) {
+        alert(err.response?.data?.message || 'Ошибка')
+      } finally {
+        calcLoading.value = false
+      }
     }
 
     const fetchAnalytics = async () => {
       try {
         loading.value = true
         const [year, month] = selectedDate.value.split('-')
-        const res = await axios.get('/api/analytics/overview', { params: { period: selectedPeriod.value, month: parseInt(month), year: parseInt(year) } })
+        const res = await axios.get('/api/analytics/overview', {
+          params: {
+            period: selectedPeriod.value,
+            month: parseInt(month),
+            year: parseInt(year)
+          },
+          credentials: 'include'
+        })
+
         if (res.data.status === 'success') {
           const data = res.data.data || {}
+
+          // Оставляем сырые данные, computed свойства пересчитают их в BYN
           analytics.value = {
             totals: data.totals || {},
             category_spending: data.category_spending || [],
@@ -315,17 +469,24 @@ export default {
             forecasts: data.forecasts || {}
           }
         }
-      } catch (err) { console.error(err) }
-      finally { loading.value = false }
+      } catch (err) {
+        console.error('Analytics fetch error:', err)
+      } finally {
+        loading.value = false
+      }
     }
 
     const formatMoney = (amount) => {
       const num = Number(amount)
-      return isNaN(num) ? '0 Br' : new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'BYN', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(num)
+      if (isNaN(num)) return '0 Br'
+      return new Intl.NumberFormat('ru-RU', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+      }).format(num) + ' Br'
     }
 
     const getCategoryPercentage = (amount) => {
-      const total = analytics.value.totals?.expenses || 1
+      const total = processedTotals.value.expenses || 1
       return ((amount / total) * 100).toFixed(1)
     }
 
@@ -344,39 +505,74 @@ export default {
     }
 
     const getDashArray = (category) => {
-      const percent = getCategoryPercentage(category.total || 0)
+      const total = category.total_in_byn || category.total || 0
+      const percent = getCategoryPercentage(total)
       const circ = 2 * Math.PI * 80
       return `${(percent / 100) * circ} ${circ}`
     }
 
     const getDashOffset = (category, idx) => {
-      const cats = analytics.value.category_spending || []
+      const cats = processedCategorySpending.value
       let total = 0
       for (let i = 0; i < idx; i++) {
-        if (cats[i]) total += parseFloat(getCategoryPercentage(cats[i].total || 0))
+        if (cats[i]) {
+          const amount = cats[i].total_in_byn || cats[i].total || 0
+          total += parseFloat(getCategoryPercentage(amount))
+        }
       }
       return -(total / 100) * (2 * Math.PI * 80)
     }
 
     const applyOptimalLimit = async (item) => {
-      if (!item?.category_id) { alert('Ошибка: ID категории не найден'); return }
+      if (!item?.category_id) {
+        alert('Ошибка: ID категории не найден')
+        return
+      }
       try {
-        const res = await axios.put(`/api/categories/${item.category_id}`, { budget_limit: item.recommended_limit })
+        const res = await axios.put(`/api/categories/${item.category_id}`, {
+          budget_limit: item.recommended_limit
+        })
         if (res.data.status === 'success') {
           alert(`Лимит для категории "${item.category_name}" установлен в ${formatMoney(item.recommended_limit)}`)
           fetchAnalytics()
         }
-      } catch (err) { alert('Ошибка при обновлении лимита') }
+      } catch (err) {
+        alert('Ошибка при обновлении лимита')
+      }
     }
 
-    onMounted(() => { fetchAnalytics() })
-    watch([selectedPeriod, selectedDate], () => { if (!loading.value) fetchAnalytics() })
+    onMounted(() => {
+      fetchAnalytics()
+    })
+
+    watch([selectedPeriod, selectedDate], () => {
+      if (!loading.value) fetchAnalytics()
+    })
 
     return {
-      analytics, loading, calcLoading, selectedPeriod, selectedDate, showOptimalDistribution,
-      showResultModal, resultModal, balanceClass, financialHealth, expenseCategoriesDistribution,
-      fetchAnalytics, calculate503020, calculate6040, calculateFourEnvelopes, calculateForecastMetrics,
-      formatMoney, getCategoryPercentage, getBudgetStatusLabel, getCategoryColor, getDashArray, getDashOffset,
+      analytics,
+      loading,
+      calcLoading,
+      selectedPeriod,
+      selectedDate,
+      showOptimalDistribution,
+      showResultModal,
+      resultModal,
+      balanceClass,
+      financialHealth,
+      processedTotals,
+      processedCategorySpending,
+      expenseCategoriesDistribution,
+      fetchAnalytics,
+      calculate503020,
+      calculate6040,
+      calculateFourEnvelopes,
+      formatMoney,
+      getCategoryPercentage,
+      getBudgetStatusLabel,
+      getCategoryColor,
+      getDashArray,
+      getDashOffset,
       applyOptimalLimit
     }
   }
@@ -415,7 +611,6 @@ export default {
 .method-503020 { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
 .method-6040 { background: linear-gradient(135deg, #10b981, #059669); color: white; }
 .method-envelopes { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
-.method-metrics { background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; }
 
 .modal-overlay {
   position: fixed;
@@ -440,13 +635,62 @@ export default {
   flex-direction: column;
 }
 
-.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-bottom: 1px solid #e2e8f0; }
-.modal-title { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 1.125rem; }
-.modal-close { background: none; border: none; cursor: pointer; color: #64748b; }
-.modal-body { padding: 1.5rem; overflow-y: auto; flex: 1; }
-.result-json { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 8px; font-size: 0.75rem; font-family: monospace; white-space: pre-wrap; margin: 0; }
-.modal-footer { display: flex; justify-content: flex-end; padding: 1rem 1.5rem; border-top: 1px solid #e2e8f0; }
-.btn-secondary { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; }
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #64748b;
+}
+
+.modal-body {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.result-json {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 1rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-family: monospace;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.btn-secondary {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
 .btn-secondary:hover { background: #e2e8f0; }
 
 .optimal-distribution-section {
@@ -454,5 +698,15 @@ export default {
   padding: 1rem;
   background: #f8fafc;
   border-radius: 16px;
+}
+
+.toggle-distribution {
+  width: 100%;
+  padding: 0.75rem;
+  background: #e2e8f0;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
 }
 </style>

@@ -397,8 +397,6 @@ export default {
     }
 
     const deleteTransaction = async (id) => {
-      if (!confirm('Вы уверены, что хотите удалить эту транзакцию?')) return
-
       try {
         await axios.delete(`/api/transactions/${id}`)
         await fetchTransactions()

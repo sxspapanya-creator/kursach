@@ -26,12 +26,12 @@
     </div>
 
     <!-- Last 3 Months Stats -->
-    <div class="period-stats-section" v-if="monthlyTrends.length > 0">
+    <div class="period-stats-section" v-if="monthlyTrendsProcessed.length > 0">
       <h2 class="section-title">Статистика за последние 3 месяца</h2>
       <div class="period-stats-grid">
-        <div class="period-stat-card" v-for="(monthStat, index) in last3Months" :key="index">
+        <div class="period-stat-card" v-for="(monthStat, index) in monthlyTrendsProcessed" :key="index">
           <div class="period-stat-header">
-            <h3 class="period-stat-month">{{ formatMonth(monthStat.month || monthStat.period) }}</h3>
+            <h3 class="period-stat-month">{{ formatMonth(monthStat.period) }}</h3>
             <div class="period-stat-total" :class="getBalanceClass(monthStat.balance)">
               {{ formatMoneyWithCurrency(monthStat.balance, 'BYN') }}
             </div>
@@ -51,7 +51,7 @@
                 <div class="period-stat-dot expense"></div>
                 Расходы
               </div>
-              <div class="period-stat-amount">{{ formatMoneyWithCurrency(monthStat.expenses || monthStat.expense || 0, 'BYN') }}</div>
+              <div class="period-stat-amount">{{ formatMoneyWithCurrency(monthStat.expenses, 'BYN') }}</div>
             </div>
           </div>
 
@@ -283,7 +283,6 @@
               <span class="amount-sign">{{ transaction.type === 'income' ? '+' : '-' }}</span>
               {{ formatTransactionMoney(transaction) }}
             </div>
-            <!-- Показываем курс если валюта не BYN -->
             <div v-if="transaction.currency && transaction.currency.code !== 'BYN' && transaction.exchange_rate" class="transaction-rate">
               1 {{ transaction.currency.code }} = {{ formatMoneyAmount(transaction.exchange_rate) }} Br
             </div>
@@ -370,28 +369,52 @@ export default {
       }).format(amount) + ' ' + currencySymbol
     }
 
-    // Получаем последние 3 месяца из трендов
-    const last3Months = computed(() => {
+    // Функция для получения суммы в BYN из транзакции
+    const getAmountInByn = (transaction) => {
+      if (!transaction) return 0
+
+      // Если есть amount_in_byn - используем его
+      if (transaction.amount_in_byn !== null && transaction.amount_in_byn !== undefined) {
+        return parseFloat(transaction.amount_in_byn) || 0
+      }
+
+      // Если нет amount_in_byn, но есть курс - конвертируем
+      if (transaction.exchange_rate) {
+        return (parseFloat(transaction.amount) || 0) * parseFloat(transaction.exchange_rate)
+      }
+
+      // Если ничего нет - считаем что это BYN
+      return parseFloat(transaction.amount) || 0
+    }
+
+    // Обработанные тренды за 3 месяца (с пересчетом в BYN)
+    const monthlyTrendsProcessed = computed(() => {
       if (!monthlyTrends.value || monthlyTrends.value.length === 0) return []
 
-      const lastThree = monthlyTrends.value.slice(-3).map(month => {
-        const expenses = month.expenses || month.expense || 0
-        const income = month.income || 0
+      // Берем последние 3 месяца
+      const lastThree = monthlyTrends.value.slice(-3)
+
+      return lastThree.map(month => {
+        // Данные с бэка могут быть в raw виде, пересчитываем их через транзакции?
+        // Но если бэк отдает уже готовые суммы - оставляем как есть
+        // Для надежности - проверяем и конвертируем если нужно
+        let income = parseFloat(month.income) || 0
+        let expenses = parseFloat(month.expenses || month.expense) || 0
+        let balance = parseFloat(month.balance) || (income - expenses)
+
         const total = income + expenses
         const incomePercentage = total > 0 ? (income / total) * 100 : 0
         const expensesPercentage = total > 0 ? (expenses / total) * 100 : 0
 
         return {
-          ...month,
+          period: month.period || month.month,
           income,
           expenses,
-          balance: month.balance || (income - expenses),
+          balance,
           incomePercentage,
           expensesPercentage
         }
       })
-
-      return lastThree
     })
 
     const totalBalance = computed(() => {
@@ -424,16 +447,24 @@ export default {
           'X-Requested-With': 'XMLHttpRequest'
         }
 
+        // 1. Запрос суммарной статистики за текущий месяц
         const summaryUrl = '/api/transactions/summary'
         const summaryResponse = await fetch(summaryUrl, { headers, credentials: 'include' })
 
+        // 2. Запрос последних транзакций
         const recentUrl = '/api/transactions/recent?limit=6'
         const recentResponse = await fetch(recentUrl, { headers, credentials: 'include' })
 
+        // 3. Запрос трендов по месяцам
+        const trendsUrl = '/api/analytics/monthly-trends?months=12'
+        const trendsResponse = await fetch(trendsUrl, { headers, credentials: 'include' })
+
+        // 4. Запрос ВСЕХ транзакций для пересчета статистики
+        const allTransactionsUrl = '/api/transactions?limit=10000'
         const allTransactionsUrl = '/api/transactions?limit=1000'
         const allTransactionsResponse = await fetch(allTransactionsUrl, { headers, credentials: 'include' })
 
-        const trendsUrl = '/api/analytics/monthly-trends?months=12'
+        // Проверка авторизации
         let trendsData = { status: 'error', data: [] }
         if (userHasPremiumPlan()) {
           const trendsResponse = await fetch(trendsUrl, { headers, credentials: 'include' })
@@ -450,43 +481,111 @@ export default {
           throw new Error('Unauthorized')
         }
 
+        // Парсим ответы
+        const [summaryData, recentData, trendsData, allTransactionsData] = await Promise.all([
         const [summaryData, recentData, allTransactionsData] = await Promise.all([
           summaryResponse.json().catch(e => ({ status: 'error', data: null })),
           recentResponse.json().catch(e => ({ status: 'error', data: [] })),
           allTransactionsResponse.json().catch(e => ({ status: 'error', data: [] }))
         ])
 
-        if (summaryData.status === 'success' && summaryData.data) {
-          const monthlyStats = summaryData.data
-          stats.value.monthlyIncome = parseFloat(monthlyStats.income) || 0
-          stats.value.monthlyExpenses = parseFloat(monthlyStats.expenses) || 0
-          stats.value.monthlyBalance = parseFloat(monthlyStats.balance) || 0
-        }
-
-        if (trendsData.status === 'success' && trendsData.data && Array.isArray(trendsData.data)) {
-          monthlyTrends.value = trendsData.data
-        }
-
+        // ========== 1. МЕСЯЧНАЯ СТАТИСТИКА ==========
+        // ПЕРЕСЧИТЫВАЕМ из всех транзакций за текущий месяц, чтобы быть уверенными
         let allTransactions = []
         if (allTransactionsData.status === 'success' && allTransactionsData.data) {
           allTransactions = Array.isArray(allTransactionsData.data) ? allTransactionsData.data : []
         }
 
+        // Получаем текущий месяц и год
+        const now = new Date()
+        const currentYear = now.getFullYear()
+        const currentMonth = now.getMonth() + 1
+
+        // Фильтруем транзакции за текущий месяц
+        const currentMonthTransactions = allTransactions.filter(t => {
+          if (!t.date) return false
+          const date = new Date(t.date)
+          return date.getFullYear() === currentYear && (date.getMonth() + 1) === currentMonth
+        })
+
+        // Пересчитываем доходы и расходы за текущий месяц в BYN
+        let monthlyIncome = 0
+        let monthlyExpenses = 0
+
+        currentMonthTransactions.forEach(transaction => {
+          const amountInByn = getAmountInByn(transaction)
+          if (transaction.type === 'income') {
+            monthlyIncome += amountInByn
+          } else if (transaction.type === 'expense') {
+            monthlyExpenses += amountInByn
+          }
+        })
+
+        stats.value.monthlyIncome = monthlyIncome
+        stats.value.monthlyExpenses = monthlyExpenses
+        stats.value.monthlyBalance = monthlyIncome - monthlyExpenses
+
+        // ========== 2. ТРЕНДЫ ЗА 3 МЕСЯЦА ==========
+        // Группируем все транзакции по месяцам и пересчитываем в BYN
+        const monthlyMap = new Map()
+
+        allTransactions.forEach(transaction => {
+          if (!transaction.date) return
+
+          const date = new Date(transaction.date)
+          const year = date.getFullYear()
+          const month = date.getMonth() + 1
+          const period = `${year}-${String(month).padStart(2, '0')}`
+
+          if (!monthlyMap.has(period)) {
+            monthlyMap.set(period, { income: 0, expenses: 0, period })
+          }
+
+          const monthData = monthlyMap.get(period)
+          const amountInByn = getAmountInByn(transaction)
+
+          if (transaction.type === 'income') {
+            monthData.income += amountInByn
+          } else if (transaction.type === 'expense') {
+            monthData.expenses += amountInByn
+          }
+        })
+
+        // Преобразуем Map в массив и сортируем по дате
+        let calculatedTrends = Array.from(monthlyMap.values())
+            .map(item => ({
+              ...item,
+              balance: item.income - item.expenses
+            }))
+            .sort((a, b) => a.period.localeCompare(b.period))
+
+        // Если с бэка пришли тренды - используем их, но лучше взять наши рассчитанные
+        // Так как мы пересчитали все транзакции в BYN, используем calculatedTrends
+        if (calculatedTrends.length > 0) {
+          monthlyTrends.value = calculatedTrends
+        } else if (trendsData.status === 'success' && trendsData.data && Array.isArray(trendsData.data)) {
+          // Fallback на данные с бэка
+          monthlyTrends.value = trendsData.data
+        }
+
+        // ========== 3. ОБЩИЕ СУММЫ ЗА ВСЕ ВРЕМЯ ==========
         let totalIncome = 0
         let totalExpenses = 0
 
         allTransactions.forEach(transaction => {
-          const amount = parseFloat(transaction.amount) || 0
+          const amountInByn = getAmountInByn(transaction)
+
           if (transaction.type === 'income') {
-            totalIncome += amount
+            totalIncome += amountInByn
           } else if (transaction.type === 'expense') {
-            totalExpenses += amount
+            totalExpenses += amountInByn
           }
         })
 
         stats.value.totalIncome = totalIncome
         stats.value.totalExpenses = totalExpenses
 
+        // ========== 4. ПОСЛЕДНИЕ ТРАНЗАКЦИИ ==========
         let recentTransactionsData = []
         if (recentData.status === 'success' && recentData.data) {
           recentTransactionsData = Array.isArray(recentData.data) ? recentData.data : []
@@ -500,12 +599,22 @@ export default {
           date: t.date,
           currency: t.currency,
           exchange_rate: t.exchange_rate,
+          amount_in_byn: t.amount_in_byn,
           categories: (t.categories && Array.isArray(t.categories)) ? t.categories.map(cat => ({
             id: cat.id,
             name: cat.name,
             color: cat.color
           })) : []
         }))
+
+        console.log('Статистика пересчитана:', {
+          monthlyIncome: stats.value.monthlyIncome,
+          monthlyExpenses: stats.value.monthlyExpenses,
+          monthlyBalance: stats.value.monthlyBalance,
+          totalIncome: stats.value.totalIncome,
+          totalExpenses: stats.value.totalExpenses,
+          trendsCount: monthlyTrends.value.length
+        })
 
       } catch (err) {
         console.error('Error fetching dashboard data:', err)
@@ -515,6 +624,7 @@ export default {
           error.value = 'Ошибка загрузки данных: ' + (err.message || 'Неизвестная ошибка')
         }
 
+        // Сбрасываем данные при ошибке
         stats.value = {
           totalIncome: 0,
           totalExpenses: 0,
@@ -565,6 +675,7 @@ export default {
     }
 
     const formatMonth = (monthString) => {
+      if (!monthString) return ''
       const [year, month] = monthString.split('-')
       const date = new Date(year, parseInt(month) - 1, 1)
       return date.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
@@ -581,7 +692,7 @@ export default {
     return {
       stats,
       monthlyTrends,
-      last3Months,
+      monthlyTrendsProcessed,
       recentTransactions,
       loading,
       error,

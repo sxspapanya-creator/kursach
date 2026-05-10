@@ -51,22 +51,22 @@ class AnalyticsTestDataSeeder extends Seeder
 
         // Создаем категории доходов
         $incomeCategories = [
-            ['name' => 'Зарплата', 'type' => 'income', 'color' => '#27ae60'],
-            ['name' => 'Фриланс', 'type' => 'income', 'color' => '#2ecc71'],
-            ['name' => 'Инвестиции', 'type' => 'income', 'color' => '#16a085'],
-            ['name' => 'Подарки', 'type' => 'income', 'color' => '#f1c40f'],
+            ['name' => 'Зарплата', 'type' => 'income', 'color' => '#27ae60', 'budget_limit' => null],
+            ['name' => 'Фриланс', 'type' => 'income', 'color' => '#2ecc71', 'budget_limit' => null],
+            ['name' => 'Инвестиции', 'type' => 'income', 'color' => '#16a085', 'budget_limit' => null],
+            ['name' => 'Подарки', 'type' => 'income', 'color' => '#f1c40f', 'budget_limit' => null],
         ];
 
-        // Создаем категории расходов
+        // Создаем категории расходов С ЛИМИТАМИ
         $expenseCategories = [
-            ['name' => 'Продукты', 'type' => 'expense', 'color' => '#e74c3c'],
-            ['name' => 'Транспорт', 'type' => 'expense', 'color' => '#3498db'],
-            ['name' => 'Развлечения', 'type' => 'expense', 'color' => '#9b59b6'],
-            ['name' => 'Коммунальные услуги', 'type' => 'expense', 'color' => '#f39c12'],
-            ['name' => 'Одежда', 'type' => 'expense', 'color' => '#e67e22'],
-            ['name' => 'Здоровье', 'type' => 'expense', 'color' => '#1abc9c'],
-            ['name' => 'Кафе и рестораны', 'type' => 'expense', 'color' => '#fd79a8'],
-            ['name' => 'Образование', 'type' => 'expense', 'color' => '#00cec9'],
+            ['name' => 'Продукты', 'type' => 'expense', 'color' => '#e74c3c', 'budget_limit' => 800],
+            ['name' => 'Транспорт', 'type' => 'expense', 'color' => '#3498db', 'budget_limit' => 300],
+            ['name' => 'Развлечения', 'type' => 'expense', 'color' => '#9b59b6', 'budget_limit' => 250],
+            ['name' => 'Коммунальные услуги', 'type' => 'expense', 'color' => '#f39c12', 'budget_limit' => 400],
+            ['name' => 'Одежда', 'type' => 'expense', 'color' => '#e67e22', 'budget_limit' => 300],
+            ['name' => 'Здоровье', 'type' => 'expense', 'color' => '#1abc9c', 'budget_limit' => 200],
+            ['name' => 'Кафе и рестораны', 'type' => 'expense', 'color' => '#fd79a8', 'budget_limit' => 250],
+            ['name' => 'Образование', 'type' => 'expense', 'color' => '#00cec9', 'budget_limit' => 150],
         ];
 
         $categories = [];
@@ -77,6 +77,7 @@ class AnalyticsTestDataSeeder extends Seeder
                 'name' => $cat['name'],
                 'type' => $cat['type'],
                 'color' => $cat['color'],
+                'budget_limit' => $cat['budget_limit'],
             ]);
         }
 
@@ -86,10 +87,17 @@ class AnalyticsTestDataSeeder extends Seeder
                 'name' => $cat['name'],
                 'type' => $cat['type'],
                 'color' => $cat['color'],
+                'budget_limit' => $cat['budget_limit'],
             ]);
         }
 
-        $this->command->info("✅ Created " . (count($incomeCategories) + count($expenseCategories)) . " categories");
+        $this->command->info("✅ Created " . (count($incomeCategories) + count($expenseCategories)) . " categories with budget limits");
+
+        // Выводим информацию о лимитах
+        $this->command->info("\n📊 Установленные лимиты на категории расходов:");
+        foreach ($expenseCategories as $cat) {
+            $this->command->info("  • {$cat['name']}: {$cat['budget_limit']} Br");
+        }
 
         // Генерируем транзакции за последние 24 месяца (2 года)
         $now = Carbon::now();
@@ -140,13 +148,11 @@ class AnalyticsTestDataSeeder extends Seeder
             if ($monthNumber == 9) {
                 $seasonalExpenseFactor = 1.15;
             }
-            // Февраль, ноябрь — обычные месяцы (без коэффициента)
 
             // ========== ДОХОДЫ ==========
 
             // Зарплата (основной доход)
             $salary = round($baseIncome * $trendFactor * $seasonalIncomeFactor, 0);
-            // Небольшой случайный разброс ±3% (без аномалий)
             $variation = rand(-30, 30) / 1000;
             $finalSalary = max(2000, round($salary * (1 + $variation), 2));
 
@@ -224,7 +230,7 @@ class AnalyticsTestDataSeeder extends Seeder
                 $transactionsCount++;
             }
 
-            // ========== РАСХОДЫ (более хаотично, но без аномалий) ==========
+            // ========== РАСХОДЫ ==========
 
             // Базовая сумма расходов (70-85% от дохода)
             $baseExpensePercent = rand(70, 85) / 100;
@@ -233,7 +239,7 @@ class AnalyticsTestDataSeeder extends Seeder
             // Применяем сезонный коэффициент
             $targetMonthlyExpense = round($baseExpenseTotal * $seasonalExpenseFactor, 2);
 
-            // Добавляем случайную вариацию ±10% (без выбросов)
+            // Добавляем случайную вариацию ±10%
             $expenseVariation = rand(-100, 100) / 1000;
             $targetMonthlyExpense = round($targetMonthlyExpense * (1 + $expenseVariation), 2);
 
@@ -264,7 +270,6 @@ class AnalyticsTestDataSeeder extends Seeder
             $monthlyExpenseTotal = 0;
 
             foreach ($expenseData as $categoryName => $data) {
-                // Рандомное распределение процента в заданном диапазоне
                 $percent = rand($data['min_percent'] * 10, $data['max_percent'] * 10) / 10;
                 $categoryTotal = round($targetMonthlyExpense * $percent / 100, 2);
 
@@ -277,7 +282,6 @@ class AnalyticsTestDataSeeder extends Seeder
                 for ($i = 0; $i < $transactionCount; $i++) {
                     if ($remaining <= 0) break;
 
-                    // Последняя транзакция забирает остаток
                     $amount = ($i == $transactionCount - 1)
                         ? round($remaining, 2)
                         : round($remaining * rand(10, 30) / 100, 2);
@@ -318,7 +322,7 @@ class AnalyticsTestDataSeeder extends Seeder
             ];
         }
 
-        $this->command->info("✅ Test data generation completed!");
+        $this->command->info("\n✅ Test data generation completed!");
         $this->command->info("📊 Period: Last 24 months (" . Carbon::now()->subMonths(23)->format('F Y') . " - " . Carbon::now()->format('F Y') . ")");
         $this->command->info("👤 User ID: {$userId}");
         $this->command->info("💰 Currency: BYN (ID: {$defaultCurrencyId})");
@@ -330,6 +334,17 @@ class AnalyticsTestDataSeeder extends Seeder
         foreach ($last12 as $stat) {
             $balanceColor = $stat['balance'] >= 0 ? '🟢' : '🔴';
             $this->command->info("  {$stat['month']}: Доходы: {$stat['income']} Br, Расходы: {$stat['expense']} Br, Баланс: {$balanceColor} {$stat['balance']} Br");
+        }
+
+        // Дополнительная информация о лимитах
+        $this->command->info("\n💰 Информация о лимитах категорий:");
+        $expenseCategoriesWithLimits = Category::where('user_id', $userId)
+            ->where('type', 'expense')
+            ->whereNotNull('budget_limit')
+            ->get();
+
+        foreach ($expenseCategoriesWithLimits as $category) {
+            $this->command->info("  • {$category->name}: лимит {$category->budget_limit} Br");
         }
     }
 }
