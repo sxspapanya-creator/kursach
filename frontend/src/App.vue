@@ -91,16 +91,20 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 
 export default {
   name: 'App',
   setup() {
     const router = useRouter()
+    const route = useRoute()
 
     // Просто читаем из localStorage, без API запроса
     const isAuthenticated = ref(!!localStorage.getItem('user'))
+
+    // localStorage не реактивен — инкремент заставляет перечитать user и hasPremiumPlan
+    const userCacheVersion = ref(0)
 
     const notification = ref({
       show: false,
@@ -109,6 +113,7 @@ export default {
     })
 
     const userData = computed(() => {
+      userCacheVersion.value
       try {
         const userStr = localStorage.getItem('user')
         return userStr ? JSON.parse(userStr) : null
@@ -180,25 +185,33 @@ export default {
       }
     }
 
-    const handleUserUpdated = () => {
-      console.log('User updated event received')
+    const bumpUserFromStorage = () => {
       const user = localStorage.getItem('user')
       isAuthenticated.value = !!user
+      userCacheVersion.value++
+    }
+
+    const handleUserUpdated = () => {
+      bumpUserFromStorage()
     }
 
     const handleUserLogout = () => {
-      console.log('User logout event received')
       isAuthenticated.value = false
       localStorage.removeItem('user')
+      userCacheVersion.value++
     }
 
     onMounted(() => {
-      // Просто обновляем из localStorage, без запроса
-      const user = localStorage.getItem('user')
-      isAuthenticated.value = !!user
+      bumpUserFromStorage()
 
       window.addEventListener('user-updated', handleUserUpdated)
       window.addEventListener('user-logout', handleUserLogout)
+    })
+
+    watch(() => route.fullPath, () => {
+      if (route.path !== '/login' && route.path !== '/register') {
+        bumpUserFromStorage()
+      }
     })
 
     onUnmounted(() => {

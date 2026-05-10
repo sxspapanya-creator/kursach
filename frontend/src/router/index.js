@@ -95,10 +95,6 @@ const routes = [
         }
     },
     {
-        path: '/:pathMatch(.*)*',
-        redirect: '/'
-    },
-    {
         path: '/transactions/mass-delete',
         name: 'MassDeleteTransactions',
         component: MassDeleteTransactions,
@@ -106,6 +102,10 @@ const routes = [
             requiresAuth: true,
             title: 'Массовое удаление транзакций'
         }
+    },
+    {
+        path: '/:pathMatch(.*)*',
+        redirect: '/'
     }
 ]
 

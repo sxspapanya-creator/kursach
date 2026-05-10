@@ -447,46 +447,40 @@ export default {
           'X-Requested-With': 'XMLHttpRequest'
         }
 
-        // 1. Запрос суммарной статистики за текущий месяц
         const summaryUrl = '/api/transactions/summary'
-        const summaryResponse = await fetch(summaryUrl, { headers, credentials: 'include' })
-
-        // 2. Запрос последних транзакций
         const recentUrl = '/api/transactions/recent?limit=6'
-        const recentResponse = await fetch(recentUrl, { headers, credentials: 'include' })
-
-        // 3. Запрос трендов по месяцам
-        const trendsUrl = '/api/analytics/monthly-trends?months=12'
-        const trendsResponse = await fetch(trendsUrl, { headers, credentials: 'include' })
-
-        // 4. Запрос ВСЕХ транзакций для пересчета статистики
         const allTransactionsUrl = '/api/transactions?limit=10000'
-        const allTransactionsUrl = '/api/transactions?limit=1000'
-        const allTransactionsResponse = await fetch(allTransactionsUrl, { headers, credentials: 'include' })
+        const trendsUrl = '/api/analytics/monthly-trends?months=12'
 
-        // Проверка авторизации
-        let trendsData = { status: 'error', data: [] }
-        if (userHasPremiumPlan()) {
-          const trendsResponse = await fetch(trendsUrl, { headers, credentials: 'include' })
-          if (trendsResponse.status === 401) {
-            throw new Error('Unauthorized')
-          }
-          trendsData = await trendsResponse.json().catch((e) => ({ status: 'error', data: [] }))
-        } else {
-          monthlyTrends.value = []
-        }
+        const summaryPromise = fetch(summaryUrl, { headers, credentials: 'include' })
+        const recentPromise = fetch(recentUrl, { headers, credentials: 'include' })
+        const allTxPromise = fetch(allTransactionsUrl, { headers, credentials: 'include' })
+        const trendsPromise = userHasPremiumPlan()
+          ? fetch(trendsUrl, { headers, credentials: 'include' })
+          : Promise.resolve(null)
+
+        const summaryResponse = await summaryPromise
+        const recentResponse = await recentPromise
+        const allTransactionsResponse = await allTxPromise
+        const trendsResponse = await trendsPromise
 
         if (summaryResponse.status === 401 || recentResponse.status === 401 ||
             allTransactionsResponse.status === 401) {
           throw new Error('Unauthorized')
         }
 
-        // Парсим ответы
-        const [summaryData, recentData, trendsData, allTransactionsData] = await Promise.all([
+        let trendsData = { status: 'error', data: [] }
+        if (trendsResponse) {
+          if (trendsResponse.status === 401) {
+            throw new Error('Unauthorized')
+          }
+          trendsData = await trendsResponse.json().catch(() => ({ status: 'error', data: [] }))
+        }
+
         const [summaryData, recentData, allTransactionsData] = await Promise.all([
-          summaryResponse.json().catch(e => ({ status: 'error', data: null })),
-          recentResponse.json().catch(e => ({ status: 'error', data: [] })),
-          allTransactionsResponse.json().catch(e => ({ status: 'error', data: [] }))
+          summaryResponse.json().catch(() => ({ status: 'error', data: null })),
+          recentResponse.json().catch(() => ({ status: 'error', data: [] })),
+          allTransactionsResponse.json().catch(() => ({ status: 'error', data: [] }))
         ])
 
         // ========== 1. МЕСЯЧНАЯ СТАТИСТИКА ==========
