@@ -81,6 +81,7 @@ const routes = [
         component: Analytics,
         meta: {
             requiresAuth: true,
+            requiresPremium: true,
             title: 'Аналитика'
         }
     },
@@ -139,6 +140,35 @@ const checkAuth = async () => {
     }
 }
 
+// Доступ к аналитике только при тарифе premium (plan_code в ответе /auth/user)
+async function userHasPremiumPlan() {
+    try {
+        const response = await fetch('/auth/user', {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'include'
+        })
+        if (response.ok) {
+            const data = await response.json()
+            if (data.user) {
+                localStorage.setItem('user', JSON.stringify(data.user))
+                return data.user.plan_code === 'premium'
+            }
+        }
+    } catch {
+        /* ignore */
+    }
+    try {
+        const u = JSON.parse(localStorage.getItem('user') || '{}')
+        return u.plan_code === 'premium'
+    } catch {
+        return false
+    }
+}
+
 // Навигационный гард
 router.beforeEach(async (to, from, next) => {
     console.log('=== НАВИГАЦИЯ ===')
@@ -163,6 +193,14 @@ router.beforeEach(async (to, from, next) => {
         console.log('❌ Редирект на / - уже авторизован')
         next('/')
         return
+    }
+
+    if (to.meta.requiresPremium && isAuthenticated) {
+        const premium = await userHasPremiumPlan()
+        if (!premium) {
+            next({ path: '/profile', query: { tab: 'subscription' } })
+            return
+        }
     }
 
     // Во всех остальных случаях разрешаем переход

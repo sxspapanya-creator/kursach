@@ -19,7 +19,8 @@ class User extends Authenticatable
         'email',
         'password',
         'google_id',
-        'plan_id'
+        'plan_id',
+        'plan_expires_at',
     ];
 
     protected $hidden = [
@@ -29,6 +30,7 @@ class User extends Authenticatable
 
     protected $casts = [
         'email_verified_at' => 'datetime',
+        'plan_expires_at' => 'datetime',
     ];
 
     public function categories(): HasMany

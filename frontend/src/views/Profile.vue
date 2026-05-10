@@ -132,12 +132,15 @@
       <!-- Панель подписки -->
       <div v-if="activeTab === 'subscription'" class="profile-panel">
         <div class="panel-header">
-          <h3>Управление подпиской</h3>
-          <p>Информация о вашем тарифе</p>
+          <h3>Тарифы</h3>
+          <p>Выберите подходящий план и срок списания</p>
         </div>
 
-        <div class="subscription-info">
-          <div class="subscription-card">
+        <div v-if="subscriptionSuccess" class="success-message">✅ {{ subscriptionSuccess }}</div>
+        <div v-if="subscriptionError" class="error-message">❌ {{ subscriptionError }}</div>
+
+        <div v-if="currentPlanBlock" class="subscription-info">
+          <div class="subscription-card current-plan-summary">
             <div class="subscription-plan">
               <div class="plan-icon">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -146,21 +149,87 @@
                 </svg>
               </div>
               <div class="plan-details">
-                <div class="plan-name">Бесплатный тариф</div>
-                <div class="plan-price">0 Br / месяц</div>
+                <div class="plan-name">{{ currentPlanBlock.name }}</div>
+                <div class="plan-price">{{ formatPlanPrice(currentPlanBlock) }} · {{ formatPlanPeriod(currentPlanBlock.type) }}</div>
               </div>
             </div>
-            <div class="plan-features">
-              <div class="feature">✅ Неограниченное количество транзакций</div>
-              <div class="feature">✅ Управление категориями</div>
-              <div class="feature">✅ Аналитика расходов</div>
-              <div class="feature">✅ 5 валют</div>
+            <p v-if="user.plan_id != null && user.plan_expires_at" class="plan-expiry" :class="{ expired: isPlanExpired }">
+              <template v-if="isPlanExpired">Срок действия истёк: {{ user.plan_expires_at }}</template>
+              <template v-else>Действует до {{ formatExpiryDate(user.plan_expires_at) }}</template>
+            </p>
+            <p v-else class="plan-expiry muted">Срок действия не назначен</p>
+          </div>
+        </div>
+
+        <div v-if="plansLoading" class="plans-loading">
+          <span class="spinner-dark"></span>
+          <span>Загрузка тарифов…</span>
+        </div>
+
+        <div v-else-if="plansError" class="error-message">{{ plansError }}</div>
+
+        <div v-else-if="planGroupSections.length" class="plans-by-code">
+          <section
+            v-for="section in planGroupSections"
+            :key="section.code"
+            class="plan-code-group"
+          >
+            <div class="plan-group-header">
+              <h3 class="plan-group-title">{{ formatGroupTitle(section.code) }}</h3>
             </div>
-            <button type="button" @click="manageSubscription" class="btn btn-secondary subscription-btn">
-              Управление подпиской
+            <div class="plans-grid">
+              <div
+                v-for="plan in section.plans"
+                :key="plan.id"
+                class="plan-offer-card"
+                :class="{ current: isCurrentPlan(plan) }"
+              >
+                <div class="plan-offer-head">
+                  <h4 class="plan-offer-title">{{ plan.name }}</h4>
+                  <div class="plan-offer-price">{{ formatPlanPrice(plan) }}</div>
+                  <div class="plan-offer-period">{{ formatPlanPeriod(plan.type) }}</div>
+                </div>
+                <p class="plan-offer-desc">{{ plan.description }}</p>
+                <button
+                  type="button"
+                  class="btn btn-primary plan-select-btn"
+                  :disabled="isCurrentPlan(plan) || settingPlanId !== null"
+                  @click="selectPlan(plan)"
+                >
+                  <span v-if="settingPlanId === plan.id" class="spinner"></span>
+                  {{ isCurrentPlan(plan) ? 'Текущий тариф' : settingPlanId === plan.id ? 'Сохранение…' : 'Выбрать' }}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div v-else-if="plans.length" class="plans-grid">
+          <div
+            v-for="plan in plans"
+            :key="plan.id"
+            class="plan-offer-card"
+            :class="{ current: isCurrentPlan(plan) }"
+          >
+            <div class="plan-offer-head">
+              <h4 class="plan-offer-title">{{ plan.name }}</h4>
+              <div class="plan-offer-price">{{ formatPlanPrice(plan) }}</div>
+              <div class="plan-offer-period">{{ formatPlanPeriod(plan.type) }}</div>
+            </div>
+            <p class="plan-offer-desc">{{ plan.description }}</p>
+            <button
+              type="button"
+              class="btn btn-primary plan-select-btn"
+              :disabled="isCurrentPlan(plan) || settingPlanId !== null"
+              @click="selectPlan(plan)"
+            >
+              <span v-if="settingPlanId === plan.id" class="spinner"></span>
+              {{ isCurrentPlan(plan) ? 'Текущий тариф' : settingPlanId === plan.id ? 'Сохранение…' : 'Выбрать' }}
             </button>
           </div>
         </div>
+
+        <p v-else-if="!plansLoading" class="plans-empty-hint">Нет доступных тарифов</p>
       </div>
 
       <!-- Кнопка выхода -->
@@ -179,14 +248,15 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import axios from 'axios'
 
 export default {
   name: 'Profile',
   setup() {
     const router = useRouter()
+    const route = useRoute()
 
     const activeTab = ref('profile')
     const user = ref({})
@@ -199,6 +269,14 @@ export default {
     const profileError = ref('')
     const passwordSuccess = ref('')
     const passwordError = ref('')
+
+    const plans = ref([])
+    const plansByCode = ref(null)
+    const plansLoading = ref(false)
+    const plansError = ref('')
+    const settingPlanId = ref(null)
+    const subscriptionSuccess = ref('')
+    const subscriptionError = ref('')
 
     // Для подтверждения email
     const needsVerification = ref(false)
@@ -223,6 +301,75 @@ export default {
 
     const isActive = computed(() => true)
 
+    const currentPlanBlock = computed(() => {
+      if (!plans.value.length) return null
+      if (user.value.plan_id != null) {
+        return plans.value.find((p) => p.id === user.value.plan_id) || null
+      }
+      return plans.value.find((p) => p.code === 'free') || null
+    })
+
+    const isCurrentPlan = (plan) => {
+      if (!plan?.id) return false
+      if (user.value.plan_id != null) {
+        return user.value.plan_id === plan.id
+      }
+      return plan.code === 'free'
+    }
+
+    const isPlanExpired = computed(() => {
+      const d = user.value.plan_expires_at
+      if (!d) return false
+      const end = new Date(d)
+      end.setHours(23, 59, 59, 999)
+      return end < new Date()
+    })
+
+    const formatPlanPeriod = (type) => {
+      if (type === null || type === undefined || type === '') return 'бессрочно'
+      if (type === 'yearly') return 'год'
+      if (type === 'monthly') return 'месяц'
+      return type || ''
+    }
+
+    const formatPlanPrice = (plan) => {
+      if (!plan) return ''
+      const sym = plan.currency?.symbol || plan.currency?.code || ''
+      const price = plan.price != null ? Number(plan.price).toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : '0'
+      return sym ? `${price} ${sym}` : price
+    }
+
+    const formatExpiryDate = (isoDate) => {
+      if (!isoDate) return ''
+      const d = new Date(isoDate)
+      return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+    }
+
+    const GROUP_CODE_ORDER = ['free', 'premium']
+
+    const planGroupSections = computed(() => {
+      const g = plansByCode.value
+      if (!g || typeof g !== 'object') return []
+      const keys = Object.keys(g)
+      keys.sort((a, b) => {
+        const ai = GROUP_CODE_ORDER.indexOf(a)
+        const bi = GROUP_CODE_ORDER.indexOf(b)
+        if (ai >= 0 && bi >= 0) return ai - bi
+        if (ai >= 0) return -1
+        if (bi >= 0) return 1
+        return a.localeCompare(b)
+      })
+      return keys.map((code) => ({
+        code,
+        plans: Array.isArray(g[code]) ? g[code] : []
+      }))
+    })
+
+    const formatGroupTitle = (code) => {
+      const labels = { free: 'Бесплатный', premium: 'Премиум' }
+      return labels[code] ?? code
+    }
+
     const fetchUser = async () => {
       try {
         const response = await axios.get('/auth/user')
@@ -230,9 +377,65 @@ export default {
           user.value = response.data.user
           form.value.name = response.data.user.name || ''
           form.value.email = response.data.user.email || ''
+          localStorage.setItem('user', JSON.stringify(response.data.user))
         }
       } catch (err) {
         console.error('Error fetching user:', err)
+      }
+    }
+
+    const fetchPlans = async () => {
+      plansLoading.value = true
+      plansError.value = ''
+      plansByCode.value = null
+      try {
+        const response = await axios.get('/api/plans', { params: { group_by: 'code' } })
+        if (response.data?.status !== 'success') {
+          plans.value = []
+          plansError.value = 'Не удалось разобрать список тарифов'
+          return
+        }
+        const raw = response.data.data
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+          plansByCode.value = raw
+          plans.value = Object.values(raw).flat()
+        } else if (Array.isArray(raw)) {
+          plans.value = raw
+        } else {
+          plans.value = []
+          plansError.value = 'Не удалось разобрать список тарифов'
+        }
+      } catch (err) {
+        plansError.value = err.response?.data?.message || err.response?.data?.error || 'Не удалось загрузить тарифы'
+        plans.value = []
+      } finally {
+        plansLoading.value = false
+      }
+    }
+
+    const selectPlan = async (plan) => {
+      if (!plan?.id || isCurrentPlan(plan)) return
+
+      subscriptionSuccess.value = ''
+      subscriptionError.value = ''
+      settingPlanId.value = plan.id
+
+      try {
+        const response = await axios.post('/api/plans/set-plan', { plan_id: plan.id })
+        if (response.data?.status === 'success') {
+          subscriptionSuccess.value = 'Тариф обновлён'
+          await fetchUser()
+          window.dispatchEvent(new CustomEvent('user-updated'))
+          setTimeout(() => {
+            subscriptionSuccess.value = ''
+          }, 4000)
+        }
+      } catch (err) {
+        const msg = err.response?.data?.message
+        const errs = err.response?.data?.errors
+        subscriptionError.value = errs ? Object.values(errs).flat().join(', ') : msg || 'Не удалось сменить тариф'
+      } finally {
+        settingPlanId.value = null
       }
     }
 
@@ -353,10 +556,6 @@ export default {
       }
     }
 
-    const manageSubscription = () => {
-      alert('Функция в разработке')
-    }
-
     const confirmLogout = () => {
         logout()
     }
@@ -388,6 +587,27 @@ export default {
 
     onMounted(() => {
       fetchUser()
+      syncTabFromRoute()
+    })
+
+    watch(activeTab, (tab) => {
+      if (tab === 'subscription') {
+        fetchPlans()
+      }
+    })
+
+    function syncTabFromRoute() {
+      const t = route.query.tab
+      if (t === 'subscription' || t === 'security' || t === 'profile') {
+        activeTab.value = t
+      }
+    }
+
+    watch(() => route.query.tab, () => {
+      syncTabFromRoute()
+      if (route.query.tab === 'subscription') {
+        fetchPlans()
+      }
     })
 
     return {
@@ -409,7 +629,21 @@ export default {
       updateProfile,
       verifyEmail,
       changePassword,
-      manageSubscription,
+      plans,
+      planGroupSections,
+      formatGroupTitle,
+      plansLoading,
+      plansError,
+      settingPlanId,
+      subscriptionSuccess,
+      subscriptionError,
+      currentPlanBlock,
+      isPlanExpired,
+      formatPlanPeriod,
+      formatPlanPrice,
+      formatExpiryDate,
+      selectPlan,
+      isCurrentPlan,
       confirmLogout
     }
   }

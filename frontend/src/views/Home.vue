@@ -316,6 +316,16 @@ export default {
     const loading = ref(true)
     const error = ref(null)
 
+    const userHasPremiumPlan = () => {
+      try {
+        const raw = localStorage.getItem('user')
+        if (!raw) return false
+        return JSON.parse(raw).plan_code === 'premium'
+      } catch {
+        return false
+      }
+    }
+
     // Символы валют для 5 основных валют
     const getCurrencySymbol = (currencyCode) => {
       const symbols = {
@@ -420,21 +430,29 @@ export default {
         const recentUrl = '/api/transactions/recent?limit=6'
         const recentResponse = await fetch(recentUrl, { headers, credentials: 'include' })
 
-        const trendsUrl = '/api/analytics/monthly-trends?months=12'
-        const trendsResponse = await fetch(trendsUrl, { headers, credentials: 'include' })
-
         const allTransactionsUrl = '/api/transactions?limit=1000'
         const allTransactionsResponse = await fetch(allTransactionsUrl, { headers, credentials: 'include' })
 
+        const trendsUrl = '/api/analytics/monthly-trends?months=12'
+        let trendsData = { status: 'error', data: [] }
+        if (userHasPremiumPlan()) {
+          const trendsResponse = await fetch(trendsUrl, { headers, credentials: 'include' })
+          if (trendsResponse.status === 401) {
+            throw new Error('Unauthorized')
+          }
+          trendsData = await trendsResponse.json().catch((e) => ({ status: 'error', data: [] }))
+        } else {
+          monthlyTrends.value = []
+        }
+
         if (summaryResponse.status === 401 || recentResponse.status === 401 ||
-            trendsResponse.status === 401 || allTransactionsResponse.status === 401) {
+            allTransactionsResponse.status === 401) {
           throw new Error('Unauthorized')
         }
 
-        const [summaryData, recentData, trendsData, allTransactionsData] = await Promise.all([
+        const [summaryData, recentData, allTransactionsData] = await Promise.all([
           summaryResponse.json().catch(e => ({ status: 'error', data: null })),
           recentResponse.json().catch(e => ({ status: 'error', data: [] })),
-          trendsResponse.json().catch(e => ({ status: 'error', data: [] })),
           allTransactionsResponse.json().catch(e => ({ status: 'error', data: [] }))
         ])
 

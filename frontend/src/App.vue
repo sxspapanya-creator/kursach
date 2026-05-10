@@ -39,7 +39,7 @@
                 <span>Категории</span>
               </router-link>
             </li>
-            <li>
+            <li v-if="hasPremiumPlan">
               <router-link to="/analytics" class="nav-link" active-class="active">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
@@ -136,6 +136,8 @@ export default {
     const userEmail = computed(() => {
       return userData.value?.email || ''
     })
+
+    const hasPremiumPlan = computed(() => userData.value?.plan_code === 'premium')
 
     const showNotification = (type, message) => {
       notification.value = { show: true, type, message }
@@ -256,6 +258,7 @@ export default {
       userInitials,
       userName,
       userEmail,
+      hasPremiumPlan,
       notification,
       logout,
       showNotification,

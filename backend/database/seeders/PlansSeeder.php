@@ -24,7 +24,7 @@ class PlansSeeder extends Seeder
             'price' => 0,
             'currency_id' => Currency::first()->id,
             'code' => PlanCodeEnum::FREE,
-            'type' => PlanTypeEnum::YEARLY,
+            'type' => null,
         ]);
 
         Plan::create([

@@ -51,6 +51,9 @@ class UserPermissionMiddleware
                 'message' => 'User not found'
             ], Response::HTTP_UNAUTHORIZED);
         }
+
+        $user->loadMissing('plan');
+
         if (!$user->plan || $user->plan->code !== PlanCodeEnum::PREMIUM->value) {
             return response()->json([
                 'error' => 'user need premium plan',

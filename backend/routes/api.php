@@ -58,7 +58,6 @@ Route::get('/currencies/available-dates', [CurrencyController::class, 'getAvaila
 Route::get('/budget/four-envelopes', [BudgetMethodController::class, 'fourEnvelopes']);
 Route::get('/budget/forecast-metrics', [BudgetMethodController::class, 'forecastMetrics']);
 Route::get('/plans', [PlanController::class, 'index']);
-Route::get('/plans/types', [PlanController::class, 'getPlanTypes']);
 Route::post('/plans/set-plan', [PlanController::class, 'setPlanToUser']);
 
 // Методы бюджетирования

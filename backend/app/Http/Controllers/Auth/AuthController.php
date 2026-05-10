@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Enum\PlanCodeEnum;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -147,11 +148,7 @@ class AuthController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'Email подтвержден, вход выполнен',
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                ]
+                'user' => $this->userPayload($user->fresh()),
             ]);
 
         } catch (ValidationException $e) {
@@ -206,13 +203,10 @@ class AuthController extends Controller
         // Проверяем авторизацию через сессию
         if (Auth::check()) {
             $user = Auth::user();
+
             return response()->json([
                 'authenticated' => true,
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                ]
+                'user' => $this->userPayload($user),
             ]);
         }
 
@@ -226,11 +220,7 @@ class AuthController extends Controller
                     Auth::login($user);
                     return response()->json([
                         'authenticated' => true,
-                        'user' => [
-                            'id' => $user->id,
-                            'name' => $user->name,
-                            'email' => $user->email,
-                        ]
+                        'user' => $this->userPayload($user),
                     ]);
                 }
             }
@@ -340,11 +330,7 @@ class AuthController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'Профиль обновлен',
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                ]
+                'user' => $this->userPayload($user->fresh()),
             ]);
 
         } catch (ValidationException $e) {
@@ -408,11 +394,7 @@ class AuthController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'Email успешно изменен',
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                ]
+                'user' => $this->userPayload($user->fresh()),
             ]);
 
         } catch (ValidationException $e) {
@@ -480,5 +462,27 @@ class AuthController extends Controller
                 'message' => 'Failed to change password: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Данные пользователя для API (в т.ч. effective plan_code: без plan_id считаем free).
+     */
+    private function userPayload(User $user): array
+    {
+        $user->loadMissing('plan');
+
+        $planCode = PlanCodeEnum::FREE->value;
+        if ($user->plan_id !== null && $user->plan !== null) {
+            $planCode = $user->plan->code;
+        }
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'plan_id' => $user->plan_id,
+            'plan_expires_at' => $user->plan_expires_at?->format('Y-m-d'),
+            'plan_code' => $planCode,
+        ];
     }
 }
