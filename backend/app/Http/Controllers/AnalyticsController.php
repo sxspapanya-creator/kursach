@@ -9,6 +9,7 @@ use App\Models\CurrencyRate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 
 class AnalyticsController extends Controller
 {
@@ -19,12 +20,146 @@ class AnalyticsController extends Controller
         return $userId;
     }
 
+    /**
+     * Загружает все курсы валют за период одним запросом
+     *
+     * @param Collection $transactions Коллекция транзакций
+     * @param Currency $baseCurrency Базовая валюта (BYN)
+     * @return array Массив курсов в формате [currency_id][date] = rate
+     */
+    private function loadRatesForTransactions(Collection $transactions, Currency $baseCurrency): array
+    {
+        if ($transactions->isEmpty()) {
+            return [];
+        }
+
+        // Получаем уникальные ID валют (исключая базовую)
+        $currencyIds = $transactions
+            ->pluck('currency_id')
+            ->unique()
+            ->filter(function($id) use ($baseCurrency) {
+                return $id != $baseCurrency->id;
+            });
+
+        if ($currencyIds->isEmpty()) {
+            return [];
+        }
+
+        // Получаем минимальную и максимальную дату среди транзакций
+        $minDate = $transactions->min('date');
+        $maxDate = $transactions->max('date');
+
+        // ОДИН запрос к базе данных
+        $allRates = CurrencyRate::whereIn('from_currency_id', $currencyIds)
+            ->where('to_currency_id', $baseCurrency->id)
+            ->whereBetween('date', [$minDate, $maxDate])
+            ->orderBy('date', 'asc')
+            ->get();
+
+        // Группируем: [currency_id][date] = rate
+        $rates = [];
+        foreach ($allRates as $rate) {
+            $currencyId = $rate->from_currency_id;
+            $dateKey = $rate->date->toDateString();
+
+            if (!isset($rates[$currencyId])) {
+                $rates[$currencyId] = [];
+            }
+
+            $rates[$currencyId][$dateKey] = $rate->rate;
+        }
+
+        return $rates;
+    }
+
+    /**
+     * Получает курс для валюты на конкретную дату из предварительно загруженных данных
+     * Если точного курса нет, ищет ближайший предыдущий
+     */
+    private function getRateFromCache(array $rates, int $currencyId, Carbon $date, Currency $baseCurrency): ?float
+    {
+        // Если это базовая валюта (BYN) - курс 1
+        if ($currencyId == $baseCurrency->id) {
+            return 1;
+        }
+
+        // Если нет данных по этой валюте
+        if (!isset($rates[$currencyId])) {
+            return null;
+        }
+
+        $dateKey = $date->toDateString();
+
+        // Если есть точный курс на дату
+        if (isset($rates[$currencyId][$dateKey])) {
+            return $rates[$currencyId][$dateKey];
+        }
+
+        // Ищем ближайший предыдущий курс
+        $availableDates = array_keys($rates[$currencyId]);
+        $lastDate = null;
+        foreach ($availableDates as $d) {
+            if ($d <= $dateKey) {
+                $lastDate = $d;
+            } else {
+                break;
+            }
+        }
+
+        return $lastDate ? $rates[$currencyId][$lastDate] : null;
+    }
+
+    /**
+     * Получает курс для валюты на конкретную дату с запросом к БД (для случаев, когда нет кэша)
+     * Ищет ближайший предыдущий курс, если точного нет
+     */
+    private function getRateFromDatabase(int $currencyId, int $baseCurrencyId, Carbon $date): ?float
+    {
+        $rate = CurrencyRate::where('from_currency_id', $currencyId)
+            ->where('to_currency_id', $baseCurrencyId)
+            ->where('date', '<=', $date)
+            ->orderBy('date', 'desc')
+            ->first();
+
+        return $rate ? $rate->rate : null;
+    }
+
+    /**
+     * Конвертирует сумму транзакции в базовую валюту (BYN)
+     */
+    private function convertToBaseCurrency(Transaction $transaction, Currency $baseCurrency, array $ratesCache = []): float
+    {
+        // Если валюта транзакции совпадает с базовой
+        if ($transaction->currency_id == $baseCurrency->id) {
+            return (float) $transaction->amount;
+        }
+
+        // Пытаемся получить курс из кэша
+        $rate = null;
+        if (!empty($ratesCache)) {
+            $rate = $this->getRateFromCache($ratesCache, $transaction->currency_id, $transaction->date, $baseCurrency);
+        }
+
+        // Если в кэше нет, идем в базу данных
+        if ($rate === null) {
+            $rate = $this->getRateFromDatabase($transaction->currency_id, $baseCurrency->id, $transaction->date);
+        }
+
+        // Если курс не найден, возвращаем исходную сумму (не конвертируем)
+        if ($rate === null) {
+            \Log::warning("Курс не найден для валюты {$transaction->currency_id} на дату {$transaction->date}");
+            return (float) $transaction->amount;
+        }
+
+        return (float) $transaction->amount * $rate;
+    }
+
     public function overview(Request $request)
     {
         try {
             $userId = $this->getUserId();
             $validated = $request->validate([
-                'period' => 'nullable|in:week,month,year',
+                'period' => 'nullable|in:month,year',
                 'year' => 'nullable|integer|min:2000|max:2100',
                 'month' => 'nullable|integer|min:1|max:12'
             ]);
@@ -37,10 +172,6 @@ class AnalyticsController extends Controller
             $endDate = null;
 
             switch ($period) {
-                case 'week':
-                    $startDate = Carbon::now()->subDays(6);
-                    $endDate = Carbon::now();
-                    break;
                 case 'year':
                     $startDate = Carbon::create($year, 1, 1)->startOfYear();
                     $endDate = Carbon::create($year, 12, 31)->endOfYear();
@@ -57,39 +188,29 @@ class AnalyticsController extends Controller
                 ->whereBetween('date', [$startDate, $endDate])
                 ->get();
 
-            $byn = Currency::where('code', 'BYN')->first();
+            $baseCurrency = Currency::where('code', 'BYN')->first();
+            if (!$baseCurrency) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Базовая валюта BYN не найдена'
+                ], 500);
+            }
 
-            // ========== КЛЮЧЕВОЕ: добавляем amount_in_byn к каждой транзакции (как в TransactionController@index) ==========
-            $transactionsWithRates = $transactions->map(function ($transaction) use ($byn) {
-                if ($transaction->currency_id && $byn && $transaction->currency_id != $byn->id) {
-                    // Ищем курс на дату транзакции или ближайший предыдущий
-                    $rate = CurrencyRate::where('from_currency_id', $transaction->currency_id)
-                        ->where('to_currency_id', $byn->id)
-                        ->where('date', '<=', $transaction->date)
-                        ->orderBy('date', 'desc')
-                        ->first();
+            // ЗАГРУЖАЕМ ВСЕ КУРСЫ ОДНИМ ЗАПРОСОМ
+            $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
 
-                    $transaction->exchange_rate = $rate ? $rate->rate : null;
-                    $transaction->amount_in_byn = $rate ? $transaction->amount * $rate->rate : $transaction->amount;
-                } else {
-                    $transaction->exchange_rate = 1;
-                    $transaction->amount_in_byn = $transaction->amount;
-                }
-                return $transaction;
-            });
-
-            // Считаем суммы используя amount_in_byn
+            // Считаем суммы используя загруженные курсы
             $totalIncome = 0;
             $totalExpense = 0;
             $categoryTotals = [];
 
-            foreach ($transactionsWithRates as $transaction) {
-                $amountInByn = $transaction->amount_in_byn;
+            foreach ($transactions as $transaction) {
+                $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
 
                 if ($transaction->type === 'income') {
-                    $totalIncome += $amountInByn;
+                    $totalIncome += $amountInBase;
                 } else {
-                    $totalExpense += $amountInByn;
+                    $totalExpense += $amountInBase;
 
                     // Группируем по категориям
                     foreach ($transaction->categories as $category) {
@@ -103,7 +224,7 @@ class AnalyticsController extends Controller
                                 'budget_limit' => $category->budget_limit ?? 0
                             ];
                         }
-                        $categoryTotals[$catId]['total'] += $amountInByn;
+                        $categoryTotals[$catId]['total'] += $amountInBase;
                     }
                 }
             }
@@ -145,7 +266,7 @@ class AnalyticsController extends Controller
                 return $b['total'] <=> $a['total'];
             });
 
-            $financialHealth = $this->calculateFinancialHealth($balance, $savingsRate);
+            $financialHealth = $this->calculateFinancialHealth($userId, $endDate);
 
             return response()->json([
                 'status' => 'success',
@@ -167,6 +288,7 @@ class AnalyticsController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            \Log::error('Overview error: ' . $e->getMessage());
             return response()->json([
                 'status' => 'error',
                 'message' => 'Ошибка: ' . $e->getMessage()
@@ -184,25 +306,25 @@ class AnalyticsController extends Controller
             $startDate = $endDate->copy()->subMonths($months)->startOfMonth();
 
             $transactions = Transaction::where('user_id', $userId)
+                ->with(['currency'])
                 ->whereBetween('date', [$startDate, $endDate])
                 ->get();
 
-            $byn = Currency::where('code', 'BYN')->first();
+            $baseCurrency = Currency::where('code', 'BYN')->first();
+            if (!$baseCurrency) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Базовая валюта BYN не найдена'
+                ], 500);
+            }
+
+            // ЗАГРУЖАЕМ ВСЕ КУРСЫ ОДНИМ ЗАПРОСОМ
+            $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
 
             $monthlyData = [];
 
             foreach ($transactions as $transaction) {
-                // Вычисляем amount_in_byn (как в TransactionController)
-                if ($transaction->currency_id && $byn && $transaction->currency_id != $byn->id) {
-                    $rate = CurrencyRate::where('from_currency_id', $transaction->currency_id)
-                        ->where('to_currency_id', $byn->id)
-                        ->where('date', '<=', $transaction->date)
-                        ->orderBy('date', 'desc')
-                        ->first();
-                    $amountInByn = $rate ? $transaction->amount * $rate->rate : $transaction->amount;
-                } else {
-                    $amountInByn = $transaction->amount;
-                }
+                $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
 
                 $date = Carbon::parse($transaction->date);
                 $monthKey = $date->format('Y-m');
@@ -211,15 +333,14 @@ class AnalyticsController extends Controller
                     $monthlyData[$monthKey] = [
                         'month' => $monthKey,
                         'income' => 0,
-                        'expense' => 0,
-                        'balance' => 0
+                        'expense' => 0
                     ];
                 }
 
                 if ($transaction->type === 'income') {
-                    $monthlyData[$monthKey]['income'] += $amountInByn;
+                    $monthlyData[$monthKey]['income'] += $amountInBase;
                 } else {
-                    $monthlyData[$monthKey]['expense'] += $amountInByn;
+                    $monthlyData[$monthKey]['expense'] += $amountInBase;
                 }
             }
 
@@ -245,47 +366,130 @@ class AnalyticsController extends Controller
             \Log::error('Monthly trends error: ' . $e->getMessage());
             return response()->json([
                 'status' => 'error',
-                'message' => 'Ошибка при получении трендов',
+                'message' => 'Ошибка при получении трендов: ' . $e->getMessage(),
                 'data' => []
             ], 500);
         }
     }
 
-    private function calculateFinancialHealth($balance, $savingsRate)
+
+     //Расчет финансового здоровья пользователя
+    private function calculateFinancialHealth(int $userId, ?Carbon $currentDate = null): array
     {
         try {
-            $score = 0;
+            $currentDate = $currentDate ?? Carbon::now();
 
-            // Оценка баланса (максимум 50 баллов)
-            if ($balance > 0) {
-                $score += min(50, ($balance / 10000) * 50);
-            } elseif ($balance < 0) {
-                $score += max(-25, ($balance / 10000) * 25);
+            // Получаем день зарплаты
+            $salaryDay = $this->getUserSalaryDay($userId);
+
+            // Данные за последние 3 месяца
+            $threeMonthsAgo = $currentDate->copy()->subMonths(3);
+
+            // Среднемесячный доход за 3 месяца
+            $avgMonthlyIncome = Transaction::where('user_id', $userId)
+                    ->where('type', 'income')
+                    ->whereBetween('date', [$threeMonthsAgo, $currentDate])
+                    ->sum('amount') / 3;
+
+            // Среднемесячные расходы за 3 месяца
+            $avgMonthlyExpense = Transaction::where('user_id', $userId)
+                    ->where('type', 'expense')
+                    ->whereBetween('date', [$threeMonthsAgo, $currentDate])
+                    ->sum('amount') / 3;
+
+            // Сбережения (накопления за всё время)
+            $savings = $this->getUserSavings($userId);
+
+            // Кредитные платежи в месяц
+            $monthlyLoanPayments = $this->getMonthlyLoanPayments($userId);
+
+            // ========== ИСПРАВЛЕНО: Баланс в текущем цикле (от последней зарплаты) ==========
+            $cycleBalance = $this->getCurrentCycleBalance($userId, $currentDate, $salaryDay);
+
+            // Дней до следующей зарплаты
+            $daysUntilSalary = $this->getDaysUntilNextSalary($userId, $salaryDay, $currentDate);
+
+            //ЛИКВИДНОСТЬ (30%)
+            $dailyExpenseRate = $avgMonthlyExpense / 30;
+            $neededUntilSalary = $dailyExpenseRate * max(1, $daysUntilSalary);
+
+            if ($cycleBalance <= 0) {
+                $liquidityScore = 0;
+            } elseif ($cycleBalance >= $neededUntilSalary * 1.5) {
+                $liquidityScore = 100;  // запас 50%+
+            } elseif ($cycleBalance >= $neededUntilSalary) {
+                $liquidityScore = 70;    // хватает точно
+            } elseif ($cycleBalance >= $neededUntilSalary * 0.7) {
+                $liquidityScore = 40;    // хватает впритык
+            } else {
+                $liquidityScore = 10;    // не хватает
             }
 
-            // Оценка нормы сбережений (максимум 50 баллов)
-            if ($savingsRate > 0) {
-                $score += min(50, ($savingsRate / 25) * 50);
-            } elseif ($savingsRate < 0) {
-                $score += max(-25, ($savingsRate / 25) * 25);
+            // ПОДУШКА БЕЗОПАСНОСТИ (30%)
+            if ($avgMonthlyExpense <= 0) {
+                $emergencyFundScore = 50;
+            } elseif ($savings >= $avgMonthlyExpense * 6) {
+                $emergencyFundScore = 100;  // 6+ месяцев
+            } elseif ($savings >= $avgMonthlyExpense * 3) {
+                $emergencyFundScore = 70;   // 3-6 месяцев
+            } elseif ($savings >= $avgMonthlyExpense * 1) {
+                $emergencyFundScore = 40;   // 1-3 месяца
+            } elseif ($savings > 0) {
+                $emergencyFundScore = 20;   // менее месяца
+            } else {
+                $emergencyFundScore = 0;    // нет сбережений
             }
 
-            $score = min(100, max(0, $score));
+            //ДОЛГОВАЯ НАГРУЗКА (20%)
+            if ($avgMonthlyIncome <= 0) {
+                $debtLoadScore = 0;
+            } elseif ($monthlyLoanPayments <= $avgMonthlyIncome * 0.2) {
+                $debtLoadScore = 100;   // менее 20% - хорошо
+            } elseif ($monthlyLoanPayments <= $avgMonthlyIncome * 0.35) {
+                $debtLoadScore = 60;    // 20-35% - допустимо
+            } elseif ($monthlyLoanPayments <= $avgMonthlyIncome * 0.5) {
+                $debtLoadScore = 30;    // 35-50% - рискованно
+            } else {
+                $debtLoadScore = 0;     // более 50% - критично
+            }
 
-            // Определение статуса
-            if ($score >= 80) {
+            //НОРМА СБЕРЕЖЕНИЙ (20%)
+            $availableAfterExpenses = $avgMonthlyIncome - $avgMonthlyExpense - $monthlyLoanPayments;
+            $savingsRate = $avgMonthlyIncome > 0 ? ($availableAfterExpenses / $avgMonthlyIncome) * 100 : 0;
+
+            if ($savingsRate >= 20) {
+                $savingsRateScore = 100;   // 20%+ - отлично
+            } elseif ($savingsRate >= 10) {
+                $savingsRateScore = 70;    // 10-20% - хорошо
+            } elseif ($savingsRate >= 5) {
+                $savingsRateScore = 40;    // 5-10% - удовлетворительно
+            } elseif ($savingsRate > 0) {
+                $savingsRateScore = 20;    // <5% - плохо
+            } else {
+                $savingsRateScore = 0;     // расходы превышают доходы
+            }
+
+            // ИТОГ
+            $totalScore = ($liquidityScore * 0.30) +
+                ($emergencyFundScore * 0.30) +
+                ($debtLoadScore * 0.20) +
+                ($savingsRateScore * 0.20);
+
+            $totalScore = round(min(100, max(0, $totalScore)));
+
+            if ($totalScore >= 80) {
                 $status = 'excellent';
                 $statusLabel = 'Отлично';
                 $color = '#27ae60';
-            } elseif ($score >= 60) {
+            } elseif ($totalScore >= 60) {
                 $status = 'good';
                 $statusLabel = 'Хорошо';
                 $color = '#2ecc71';
-            } elseif ($score >= 40) {
+            } elseif ($totalScore >= 40) {
                 $status = 'fair';
                 $statusLabel = 'Удовлетворительно';
                 $color = '#f39c12';
-            } elseif ($score >= 20) {
+            } elseif ($totalScore >= 20) {
                 $status = 'poor';
                 $statusLabel = 'Плохо';
                 $color = '#e74c3c';
@@ -296,18 +500,116 @@ class AnalyticsController extends Controller
             }
 
             return [
-                'score' => round($score),
+                'score' => $totalScore,
                 'status' => $status,
                 'status_label' => $statusLabel,
-                'color' => $color
+                'color' => $color,
+                'components' => [
+                    'liquidity' => [
+                        'score' => round($liquidityScore),
+                        'balance' => round($cycleBalance, 2),  // ← теперь правильный баланс
+                        'needed_until_salary' => round($neededUntilSalary, 2),
+                        'days_until_salary' => $daysUntilSalary
+                    ],
+                    'emergency_fund' => [
+                        'score' => round($emergencyFundScore),
+                        'savings' => round($savings, 2),
+                        'months_coverage' => $avgMonthlyExpense > 0 ? round($savings / $avgMonthlyExpense, 1) : 0
+                    ],
+                    'debt_load' => [
+                        'score' => round($debtLoadScore),
+                        'monthly_payments' => round($monthlyLoanPayments, 2),
+                        'percent_of_income' => $avgMonthlyIncome > 0 ? round(($monthlyLoanPayments / $avgMonthlyIncome) * 100) : 0
+                    ],
+                    'savings_rate' => [
+                        'score' => round($savingsRateScore),
+                        'rate' => round($savingsRate, 1),
+                        'saved_amount' => round($availableAfterExpenses, 2)
+                    ]
+                ]
             ];
+
         } catch (\Exception $e) {
+            \Log::error('Financial health calculation error: ' . $e->getMessage());
+
             return [
                 'score' => 0,
                 'status' => 'poor',
                 'status_label' => 'Не определено',
-                'color' => '#95a5a6'
+                'color' => '#95a5a6',
+                'components' => []
             ];
         }
+    }
+
+    //Расчет баланса в текущем финансовом цикле
+    private function getCurrentCycleBalance(int $userId, Carbon $currentDate, int $salaryDay): float
+    {
+        // Находим дату последней зарплаты
+        $lastSalaryDate = Carbon::create($currentDate->year, $currentDate->month, $salaryDay);
+
+        if ($lastSalaryDate > $currentDate) {
+            $lastSalaryDate->subMonth();
+        }
+
+        // Доходы с даты последней зарплаты
+        $income = Transaction::where('user_id', $userId)
+            ->where('type', 'income')
+            ->where('date', '>=', $lastSalaryDate)
+            ->where('date', '<=', $currentDate)
+            ->sum('amount');
+
+        // Расходы с даты последней зарплаты
+        $expense = Transaction::where('user_id', $userId)
+            ->where('type', 'expense')
+            ->where('date', '>=', $lastSalaryDate)
+            ->where('date', '<=', $currentDate)
+            ->sum('amount');
+
+        return $income - $expense;
+    }
+
+    private function getUserSalaryDay(int $userId): int
+    {
+        // По умолчанию 25 число
+        $defaultDay = 25;
+
+        return $defaultDay;
+    }
+
+    private function getDaysUntilNextSalary(int $userId, int $salaryDay, Carbon $currentDate): int
+    {
+        $nextSalaryDate = Carbon::create($currentDate->year, $currentDate->month, $salaryDay);
+        if ($nextSalaryDate <= $currentDate) {
+            $nextSalaryDate->addMonth();
+        }
+        return $currentDate->diffInDays($nextSalaryDate);
+    }
+
+    private function getUserSavings(int $userId): float
+    {
+        $totalIncome = Transaction::where('user_id', $userId)->where('type', 'income')->sum('amount');
+        $totalExpense = Transaction::where('user_id', $userId)->where('type', 'expense')->sum('amount');
+        return max(0, $totalIncome - $totalExpense);
+    }
+
+    private function getMonthlyLoanPayments(int $userId): float
+    {
+        $loanCategory = Category::where('user_id', $userId)
+            ->where('name', 'Кредиты')
+            ->where('type', 'expense')
+            ->first();
+
+        if ($loanCategory) {
+            $threeMonthsAgo = Carbon::now()->subMonths(3);
+            $totalLoanPayments = Transaction::where('user_id', $userId)
+                ->whereHas('categories', function($q) use ($loanCategory) {
+                    $q->where('categories.id', $loanCategory->id);
+                })
+                ->whereBetween('date', [$threeMonthsAgo, Carbon::now()])
+                ->sum('amount');
+            return $totalLoanPayments / 3;
+        }
+        return 0;
     }
 }

@@ -6,7 +6,6 @@
       <div class="period-controls">
         <select v-model="selectedPeriod">
           <option value="month">Месяц</option>
-          <option value="week">Неделя</option>
           <option value="year">Год</option>
         </select>
         <input v-model="selectedDate" type="month" @change="fetchAnalytics">
@@ -58,13 +57,23 @@
     <!-- Основные метрики -->
     <div class="metrics-grid">
       <div class="metric-card health-card" :style="{ borderColor: financialHealth.color }">
-        <div class="metric-icon">❤️</div>
-        <div class="metric-content">
-          <h3>Финансовое здоровье</h3>
-          <div class="metric-value">{{ financialHealth.score }}/100</div>
-          <div class="metric-label">{{ financialHealth.status_label }}</div>
-          <div class="health-progress">
-            <div class="progress-bar" :style="{ width: financialHealth.score + '%', backgroundColor: financialHealth.color }"></div>
+        <div class="metric-tooltip">
+          <div class="metric-icon">❤️</div>
+          <div class="metric-content">
+            <h3>Финансовое здоровье</h3>
+            <div class="metric-value">{{ financialHealth.score }}/100</div>
+            <div class="metric-label">{{ financialHealth.status_label }}</div>
+            <div class="health-progress">
+              <div class="progress-bar" :style="{ width: financialHealth.score + '%', backgroundColor: financialHealth.color }"></div>
+            </div>
+          </div>
+          <div class="tooltip-text">
+            <strong>Как рассчитано?</strong><br>
+            📊 Ликвидность (30%): остаток до зарплаты<br>
+            🛡️ Подушка (30%): сбережения ÷ расходы<br>
+            💳 Долги (20%): платежи ÷ доход<br>
+            💰 Сбережения (20%): остаток после трат<br>
+            <span class="tooltip-score">Итог: {{ financialHealth.score }}/100</span>
           </div>
         </div>
       </div>
@@ -708,5 +717,56 @@ export default {
   border-radius: 8px;
   cursor: pointer;
   font-weight: 500;
+}
+
+.metric-tooltip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  cursor: help;
+}
+
+.tooltip-text {
+  visibility: hidden;
+  width: 260px;
+  background-color: #1e293b;
+  color: #fff;
+  text-align: left;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  position: absolute;
+  z-index: 100;
+  bottom: 125%;
+  left: 50%;
+  margin-left: -130px;
+  font-size: 0.75rem;
+  font-weight: normal;
+  line-height: 1.4;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.metric-tooltip:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
+
+.tooltip-text strong {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #93c5fd;
+}
+
+.tooltip-score {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #475569;
+  width: 100%;
+  font-weight: 600;
+  color: #facc15;
 }
 </style>
