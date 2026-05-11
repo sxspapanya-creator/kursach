@@ -315,35 +315,24 @@ class AnalyticsController extends Controller
     }
 
     private function getUserSalaryDay(int $userId): int {
-        // 1. Находим все доходы за последние 6 месяцев
         $incomes = Transaction::where('user_id', $userId)
             ->where('type', 'income')
             ->where('date', '>=', Carbon::now()->subMonths(6))
             ->orderBy('amount', 'desc')
             ->get();
 
-        if ($incomes->isEmpty()) {
-            return 25; // значение по умолчанию
-        }
+        if ($incomes->isEmpty()) return 25;
 
-        // 2. Отбираем крупные доходы (вероятно, зарплата)
         $avgIncome = $incomes->avg('amount');
-        $potentialSalaries = $incomes->filter(function($t) use ($avgIncome) {
-            return $t->amount >= $avgIncome * 0.7;
-        });
+        $potentialSalaries = $incomes->filter(fn($t) => $t->amount >= $avgIncome * 0.7);
+        if ($potentialSalaries->isEmpty()) return 25;
 
-        if ($potentialSalaries->isEmpty()) {
-            return 25;
-        }
-
-        // 3. Группируем по дню месяца
         $dayCount = [];
         foreach ($potentialSalaries as $salary) {
             $day = Carbon::parse($salary->date)->day;
             $dayCount[$day] = ($dayCount[$day] ?? 0) + 1;
         }
 
-        // 4. Находим самый частый день
         $maxCount = 0;
         $salaryDay = 25;
         foreach ($dayCount as $day => $count) {
@@ -352,7 +341,6 @@ class AnalyticsController extends Controller
                 $salaryDay = $day;
             }
         }
-
         return $salaryDay;
     }
 
@@ -382,46 +370,6 @@ class AnalyticsController extends Controller
         return 0;
     }
 
-    public function monthlyTrends(Request $request): \Illuminate\Http\JsonResponse
-    {
-        try {
-            $userId = $this->getUserId();
-            $months = $request->input('months', 12);
-            $endDate = Carbon::now()->endOfMonth();
-            $startDate = $endDate->copy()->subMonths($months)->startOfMonth();
-
-            $transactions = Transaction::where('user_id', $userId)->with(['currency'])->whereBetween('date', [$startDate, $endDate])->get();
-            $baseCurrency = Currency::where('code', 'BYN')->first();
-            if (!$baseCurrency) return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
-
-            $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
-            $monthlyData = [];
-
-            foreach ($transactions as $transaction) {
-                $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
-                $date = Carbon::parse($transaction->date);
-                $monthKey = $date->format('Y-m');
-                if (!isset($monthlyData[$monthKey])) $monthlyData[$monthKey] = ['month' => $monthKey, 'income' => 0, 'expense' => 0];
-                if ($transaction->type === 'income') $monthlyData[$monthKey]['income'] += $amountInBase;
-                else $monthlyData[$monthKey]['expense'] += $amountInBase;
-            }
-
-            ksort($monthlyData);
-            $result = [];
-            foreach ($monthlyData as $data) {
-                $result[] = [
-                    'month' => $data['month'],
-                    'income' => round($data['income'], 2),
-                    'expense' => round($data['expense'], 2),
-                    'balance' => round($data['income'] - $data['expense'], 2)
-                ];
-            }
-            return response()->json(['status' => 'success', 'data' => $result]);
-        } catch (\Exception $e) {
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
-        }
-    }
-
     // ==================== МЕТОДЫ ДЛЯ ПОЛУЧЕНИЯ ДАННЫХ ====================
 
     private function getMonthlyExpenseAmount(int $userId, int $year, int $month): float
@@ -438,239 +386,449 @@ class AnalyticsController extends Controller
         return $total;
     }
 
-    private function getExpensesForPeriod(int $userId, Carbon $startDate, Carbon $endDate): float
+    private function getMonthlyExpensesArray(int $userId, int $months = 24): array
     {
-        $transactions = Transaction::where('user_id', $userId)->where('type', 'expense')
-            ->with(['currency'])->whereBetween('date', [$startDate, $endDate])->get();
-        $baseCurrency = Currency::where('code', 'BYN')->first();
-        if (!$baseCurrency) return 0;
-        $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
-        $total = 0;
-        foreach ($transactions as $transaction) {
-            $total += $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
-        }
-        return $total;
-    }
-
-    private function getMonthlyExpenses(int $userId, Carbon $startDate, Carbon $endDate): array
-    {
-        $transactions = Transaction::where('user_id', $userId)->where('type', 'expense')
-            ->with(['currency'])->whereBetween('date', [$startDate, $endDate])->get();
-        $baseCurrency = Currency::where('code', 'BYN')->first();
-        if (!$baseCurrency) return [];
-        $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
-        $monthlyData = [];
-        foreach ($transactions as $transaction) {
-            $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
-            $date = Carbon::parse($transaction->date);
-            $monthKey = $date->format('Y-m');
-            if (!isset($monthlyData[$monthKey])) $monthlyData[$monthKey] = 0;
-            $monthlyData[$monthKey] += $amountInBase;
-        }
-        ksort($monthlyData);
-        return array_values($monthlyData);
-    }
-
-    private function getCategoryMonthlyExpense(int $userId, int $categoryId, int $year, int $month): float
-    {
-        $transactions = Transaction::where('user_id', $userId)->where('type', 'expense')
-            ->whereHas('categories', fn($q) => $q->where('categories.id', $categoryId))
-            ->with(['currency'])->whereYear('date', $year)->whereMonth('date', $month)->get();
-        $baseCurrency = Currency::where('code', 'BYN')->first();
-        if (!$baseCurrency) return 0;
-        $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
-        $total = 0;
-        foreach ($transactions as $transaction) {
-            $total += $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
-        }
-        return $total;
-    }
-
-    // ==================== СЕЗОННЫЕ КОЭФФИЦИЕНТЫ ====================
-
-    private function getWeightedSeasonalCoefficients(int $userId): array
-    {
-        $coefficients = [];
-        $currentYear = Carbon::now()->year;
-        $monthlyRatios = array_fill(1, 12, []);
-        $monthlyWeights = array_fill(1, 12, []);
-
-        for ($year = $currentYear - 3; $year <= $currentYear - 1; $year++) {
-            $yearsAgo = $currentYear - $year;
-            $weight = pow(0.8, $yearsAgo);
-
-            for ($month = 2; $month <= 12; $month++) {
-                $prevExpense = $this->getMonthlyExpenseAmount($userId, $year, $month - 1);
-                $currExpense = $this->getMonthlyExpenseAmount($userId, $year, $month);
-                if ($prevExpense > 0 && $currExpense > 0) {
-                    $ratio = max(0.5, min(2.0, $currExpense / $prevExpense));
-                    $monthlyRatios[$month][] = $ratio;
-                    $monthlyWeights[$month][] = $weight;
-                }
-            }
-
-            if ($year > $currentYear - 3) {
-                $prevDec = $this->getMonthlyExpenseAmount($userId, $year - 1, 12);
-                $jan = $this->getMonthlyExpenseAmount($userId, $year, 1);
-                if ($prevDec > 0 && $jan > 0) {
-                    $ratio = max(0.5, min(2.0, $jan / $prevDec));
-                    $monthlyRatios[1][] = $ratio;
-                    $monthlyWeights[1][] = $weight;
-                }
-            }
-        }
-
-        for ($month = 1; $month <= 12; $month++) {
-            if (count($monthlyRatios[$month]) >= 2) {
-                $coefficients[$month] = round($this->calculateWeightedMedian($monthlyRatios[$month], $monthlyWeights[$month]), 2);
-            } elseif (count($monthlyRatios[$month]) == 1) {
-                $coefficients[$month] = round($monthlyRatios[$month][0], 2);
-            } else {
-                $coefficients[$month] = 1.0;
-            }
-        }
-
-        $totalRatios = array_sum(array_map('count', $monthlyRatios));
-        if ($totalRatios < 6) return array_fill(1, 12, 1.0);
-        return $coefficients;
-    }
-
-    private function getCategorySeasonalFactor(int $userId, int $categoryId, int $targetMonth): float
-    {
-        $currentYear = Carbon::now()->year;
-        $ratios = [];
-
-        for ($year = $currentYear - 2; $year <= $currentYear - 1; $year++) {
-            $prevMonthExpense = $this->getCategoryMonthlyExpense($userId, $categoryId, $year, $targetMonth - 1);
-            $currentMonthExpense = $this->getCategoryMonthlyExpense($userId, $categoryId, $year, $targetMonth);
-            if ($prevMonthExpense > 0 && $currentMonthExpense > 0) {
-                $ratios[] = $currentMonthExpense / $prevMonthExpense;
-            }
-        }
-
-        if (empty($ratios)) return 1.0;
-        return max(0.5, min(2.0, array_sum($ratios) / count($ratios)));
-    }
-
-    private function calculateWeightedMedian(array $values, array $weights): float
-    {
-        if (count($values) != count($weights)) return $this->calculateMedian($values);
-        array_multisort($values, $weights);
-        $totalWeight = array_sum($weights);
-        $cumulativeWeight = 0;
-        $targetWeight = $totalWeight / 2;
-        for ($i = 0; $i < count($values); $i++) {
-            $cumulativeWeight += $weights[$i];
-            if ($cumulativeWeight >= $targetWeight) return $values[$i];
-        }
-        return $values[count($values) - 1] ?? 1.0;
-    }
-
-    private function calculateMedian(array $values): float
-    {
-        $count = count($values);
-        if ($count == 0) return 1.0;
-        sort($values);
-        $middle = floor($count / 2);
-        if ($count % 2 == 0) return ($values[$middle - 1] + $values[$middle]) / 2;
-        return $values[$middle];
-    }
-
-    // ==================== КОЭФФИЦИЕНТ ТРЕНДА ====================
-
-    private function calculateTrend(int $userId): float
-    {
-        $monthlyTotals = [];
-        for ($i = 23; $i >= 0; $i--) {
+        $result = [];
+        for ($i = $months - 1; $i >= 0; $i--) {
             $date = Carbon::now()->subMonths($i);
             $amount = $this->getMonthlyExpenseAmount($userId, $date->year, $date->month);
-            if ($amount > 0) $monthlyTotals[] = $amount;
+            $result[] = $amount > 0 ? $amount : 0;
+        }
+        return $result;
+    }
+
+    // ==================== КЛАССИЧЕСКИЙ МЕТОД ХОЛЬТА-ВИНТЕРСА ====================
+
+    /**
+     * Классический метод Хольта-Винтерса для прогнозирования временных рядов
+     *
+     * Формулы:
+     * Lt = α × Yt + (1-α) × (Lt-1 + Tt-1)      - уровень
+     * Tt = β × (Lt - Lt-1) + (1-β) × Tt-1      - тренд
+     * St = γ × (Yt / Lt) + (1-γ) × St-p        - сезонность
+     * Ft+k = (Lt + k × Tt) × St-p+k            - прогноз
+     *
+     * @param array $data Исторические данные (помесячные расходы)
+     * @param int $seasonalPeriod Период сезонности (12 месяцев)
+     * @param int $forecastSteps Количество шагов прогноза (месяцев)
+     * @return array Прогнозные значения
+     */
+    private function holtWinters(array $data, int $seasonalPeriod = 12, int $forecastSteps = 6): array
+    {
+        $n = count($data);
+        if ($n < $seasonalPeriod * 2) {
+            // Недостаточно данных — используем простой метод
+            return $this->simpleForecast($data, $forecastSteps);
         }
 
-        if (count($monthlyTotals) < 6) return 1.0;
+        // Параметры сглаживания (оптимизированы для финансовых данных)
+        $alpha = $this->optimizeAlpha($data);
+        $beta = $this->optimizeBeta($data);
+        $gamma = $this->optimizeGamma($data);
 
-        // Фильтрация аномалий
-        $filteredTotals = $this->filterAnomaliesFromArray($monthlyTotals);
+        // Инициализация компонентов
+        list($level, $trend, $seasonality) = $this->initHoltWinters($data, $seasonalPeriod);
 
-        if (count($filteredTotals) < 4) return 1.0;
+        // Применение формул Хольта-Винтерса
+        for ($t = 0; $t < $n; $t++) {
+            $oldLevel = $level;
 
-        $n = count($filteredTotals);
-        $x = range(0, $n - 1);
-        $sumX = array_sum($x);
-        $sumY = array_sum($filteredTotals);
-        $sumXY = array_sum(array_map(fn($xi, $yi) => $xi * $yi, $x, $filteredTotals));
-        $sumX2 = array_sum(array_map(fn($xi) => $xi * $xi, $x));
+            // Уровень (горизонталь)
+            $level = $alpha * $data[$t] + (1 - $alpha) * ($level + $trend);
 
-        $denominator = ($n * $sumX2 - $sumX * $sumX);
-        if ($denominator == 0) return 1.0;
+            // Тренд
+            $trend = $beta * ($level - $oldLevel) + (1 - $beta) * $trend;
 
-        $slope = ($n * $sumXY - $sumX * $sumY) / $denominator;
-        $lastMean = array_sum(array_slice($filteredTotals, -3)) / 3;
-
-        if ($lastMean > 0) {
-            $trend = 1 + ($slope / $lastMean);
-            // Ограничиваем тренд более узкими пределами ±3%
-            return max(0.97, min(1.03, $trend));
+            // Сезонность
+            $seasonIndex = $t % $seasonalPeriod;
+            $seasonality[$seasonIndex] = $gamma * ($data[$t] / $level) + (1 - $gamma) * $seasonality[$seasonIndex];
         }
 
-        return 1.0;
+        // Прогноз
+        $forecast = [];
+        for ($k = 1; $k <= $forecastSteps; $k++) {
+            $seasonIndex = ($n + $k - 1) % $seasonalPeriod;
+            $forecast[] = ($level + $k * $trend) * $seasonality[$seasonIndex];
+        }
+
+        return $forecast;
+    }
+
+    /**
+     * Инициализация компонентов Хольта-Винтерса
+     */
+    private function initHoltWinters(array $data, int $seasonalPeriod): array
+    {
+        $n = count($data);
+
+        // Начальный уровень — среднее за первый сезон
+        $firstSeason = array_slice($data, 0, $seasonalPeriod);
+        $level = array_sum($firstSeason) / $seasonalPeriod;
+
+        // Начальный тренд — среднее изменение между сезонами
+        $trend = 0;
+        $seasons = floor($n / $seasonalPeriod);
+        for ($s = 0; $s < $seasons - 1; $s++) {
+            $seasonStart = $s * $seasonalPeriod;
+            $seasonEnd = $seasonStart + $seasonalPeriod;
+            $seasonAvg = array_sum(array_slice($data, $seasonStart, $seasonalPeriod)) / $seasonalPeriod;
+            $nextSeasonAvg = array_sum(array_slice($data, $seasonEnd, $seasonalPeriod)) / $seasonalPeriod;
+            $trend += ($nextSeasonAvg - $seasonAvg) / $seasonalPeriod;
+        }
+        $trend = $trend / max(1, $seasons - 1);
+
+        // Начальная сезонность
+        $seasonality = [];
+        for ($i = 0; $i < $seasonalPeriod; $i++) {
+            $seasonalSum = 0;
+            $seasonCount = 0;
+            for ($j = $i; $j < $n; $j += $seasonalPeriod) {
+                if ($j < $n) {
+                    $seasonalSum += $data[$j] / $level;
+                    $seasonCount++;
+                }
+            }
+            $seasonality[] = $seasonCount > 0 ? $seasonalSum / $seasonCount : 1.0;
+        }
+
+        // Нормализация сезонности (среднее = 1)
+        $seasonalityMean = array_sum($seasonality) / $seasonalPeriod;
+        if ($seasonalityMean > 0) {
+            $seasonality = array_map(fn($s) => $s / $seasonalityMean, $seasonality);
+        }
+
+        return [$level, $trend, $seasonality];
+    }
+
+    /**
+     * Оптимизация параметра α (уровень)
+     */
+    private function optimizeAlpha(array $data): float
+    {
+        // Поиск оптимального α в диапазоне [0.1, 0.9]
+        $bestAlpha = 0.3;
+        $bestMSE = INF;
+
+        for ($alpha = 0.1; $alpha <= 0.9; $alpha += 0.1) {
+            $mse = $this->calculateMSE($data, $alpha, 0.2, 0.3);
+            if ($mse < $bestMSE) {
+                $bestMSE = $mse;
+                $bestAlpha = $alpha;
+            }
+        }
+
+        return $bestAlpha;
+    }
+
+    /**
+     * Оптимизация параметра β (тренд)
+     */
+    private function optimizeBeta(array $data): float
+    {
+        $bestBeta = 0.2;
+        $bestMSE = INF;
+
+        for ($beta = 0.05; $beta <= 0.5; $beta += 0.05) {
+            $mse = $this->calculateMSE($data, 0.3, $beta, 0.3);
+            if ($mse < $bestMSE) {
+                $bestMSE = $mse;
+                $bestBeta = $beta;
+            }
+        }
+
+        return $bestBeta;
+    }
+
+    /**
+     * Оптимизация параметра γ (сезонность)
+     */
+    private function optimizeGamma(array $data): float
+    {
+        $bestGamma = 0.3;
+        $bestMSE = INF;
+
+        for ($gamma = 0.1; $gamma <= 0.7; $gamma += 0.1) {
+            $mse = $this->calculateMSE($data, 0.3, 0.2, $gamma);
+            if ($mse < $bestMSE) {
+                $bestMSE = $mse;
+                $bestGamma = $gamma;
+            }
+        }
+
+        return $bestGamma;
+    }
+
+    /**
+     * Расчет MSE (Mean Squared Error) для заданных параметров
+     */
+    private function calculateMSE(array $data, float $alpha, float $beta, float $gamma): float
+    {
+        $n = count($data);
+        if ($n < 12) return INF;
+
+        $seasonalPeriod = 12;
+        list($level, $trend, $seasonality) = $this->initHoltWinters($data, $seasonalPeriod);
+
+        $errors = [];
+        for ($t = 0; $t < $n; $t++) {
+            $oldLevel = $level;
+            $level = $alpha * $data[$t] + (1 - $alpha) * ($level + $trend);
+            $trend = $beta * ($level - $oldLevel) + (1 - $beta) * $trend;
+            $seasonIndex = $t % $seasonalPeriod;
+
+            // Ошибка для последней трети данных (валидация)
+            if ($t > $n * 0.7) {
+                $predicted = ($oldLevel + $trend) * $seasonality[$seasonIndex];
+                $errors[] = pow($data[$t] - $predicted, 2);
+            }
+
+            $seasonality[$seasonIndex] = $gamma * ($data[$t] / $level) + (1 - $gamma) * $seasonality[$seasonIndex];
+        }
+
+        return empty($errors) ? INF : array_sum($errors) / count($errors);
+    }
+
+    /**
+     * Простой прогноз при недостатке данных
+     */
+    private function simpleForecast(array $data, int $steps): array
+    {
+        $n = count($data);
+        if ($n == 0) return array_fill(0, $steps, 0);
+
+        $lastValue = $data[$n - 1];
+        $avgChange = 0;
+
+        if ($n >= 2) {
+            $sumChange = 0;
+            for ($i = 1; $i < $n; $i++) {
+                $sumChange += $data[$i] - $data[$i - 1];
+            }
+            $avgChange = $sumChange / ($n - 1);
+        }
+
+        $forecast = [];
+        for ($i = 1; $i <= $steps; $i++) {
+            $forecast[] = max(0, $lastValue + $avgChange * $i);
+        }
+
+        return $forecast;
+    }
+
+    // ==================== ПРОГНОЗ НА 30 ДНЕЙ (НА ОСНОВЕ ХОЛЬТА-ВИНТЕРСА) ====================
+
+    public function forecastNext30Days(Request $request): \Illuminate\Http\JsonResponse
+    {
+        try {
+            $userId = $this->getUserId();
+            if (!Transaction::where('user_id', $userId)->exists()) {
+                return response()->json(['status' => 'success', 'data' => ['has_data' => false, 'message' => 'Нет данных для прогноза. Добавьте транзакции.']]);
+            }
+
+            // Получаем исторические данные за последние 24 месяца
+            $historicalData = $this->getMonthlyExpensesArray($userId, 24);
+
+            // Фильтрация нулевых значений и аномалий
+            $filteredData = array_values(array_filter($historicalData, fn($v) => $v > 0));
+
+            // Прогноз на 6 месяцев с помощью Хольта-Винтерса
+            $monthlyForecast = $this->holtWinters($filteredData, 12, 6);
+
+            // Текущий средний дневной расход
+            $lastCompleteMonth = Carbon::now()->subMonth()->startOfMonth();
+            $baselineTotal = $this->getMonthlyExpenseAmount($userId, $lastCompleteMonth->year, $lastCompleteMonth->month);
+            $dailyBaseline = $baselineTotal / $lastCompleteMonth->daysInMonth;
+
+            // Ближайший месячный прогноз (на следующий месяц)
+            $nextMonthForecast = $monthlyForecast[0] ?? $dailyBaseline * 30;
+            $nextMonthDaily = $nextMonthForecast / 30;
+
+            // Коэффициент дней недели
+            $dayOfWeekFactors = $this->calculateDayOfWeekFactors($userId);
+
+            // Коэффициент тренда (из Хольта-Винтерса)
+            $trend = $this->calculateTrendFromHoltWinters($filteredData);
+
+            // Сезонный коэффициент
+            $seasonalFactor = $this->calculateSeasonalFactor($historicalData);
+
+            // Прогноз на 30 дней
+            $dailyForecasts = [];
+            $totalForecast = 0;
+            $currentDate = Carbon::now()->copy();
+
+            for ($i = 0; $i < 30; $i++) {
+                $dayOfWeek = $currentDate->dayOfWeek;
+                $dayFactor = $dayOfWeekFactors[$dayOfWeek] ?? 1.0;
+
+                // Комбинированный прогноз: дневной базовый + ежемесячный прогноз Хольта-Винтерса
+                $dailyForecast = ($dailyBaseline * $dayFactor * $trend + $nextMonthDaily) / 2;
+
+                $dailyForecasts[] = [
+                    'date' => $currentDate->format('Y-m-d'),
+                    'day_of_week' => $this->getRussianDayOfWeek($currentDate->dayOfWeek),
+                    'forecast' => round($dailyForecast, 2)
+                ];
+                $totalForecast += $dailyForecast;
+                $currentDate->addDay();
+            }
+
+            // Прогноз по категориям
+            $categoryForecasts = $this->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $trend);
+
+            // Доверительный интервал
+            $interval = $this->getPredictionInterval($userId, $totalForecast, 30);
+
+            // Confidence score
+            $confidence = $this->calculateConfidence($userId);
+
+            // Метрики качества модели
+            $modelMetrics = $this->calculateModelMetrics($filteredData, $monthlyForecast);
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'has_data' => true,
+                    'model' => 'Holt-Winters',
+                    'period' => ['start' => Carbon::now()->format('Y-m-d'), 'end' => Carbon::now()->addDays(29)->format('Y-m-d'), 'days' => 30],
+                    'total_forecast' => round($totalForecast, 2),
+                    'daily_average' => round($totalForecast / 30, 2),
+                    'daily_forecasts' => $dailyForecasts,
+                    'monthly_forecast' => array_map(fn($v) => round($v, 2), $monthlyForecast),
+                    'category_forecasts' => $categoryForecasts,
+                    'confidence_interval' => $interval,
+                    'trend_factor' => round($trend, 3),
+                    'seasonal_factor' => round($seasonalFactor, 2),
+                    'model_metrics' => $modelMetrics,
+                    'confidence' => $confidence['percent'],
+                    'confidence_level' => $confidence['level'],
+                    'confidence_text' => $confidence['text']
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Forecast30Days error: ' . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Расчет тренда на основе метода Хольта-Винтерса
+     */
+    private function calculateTrendFromHoltWinters(array $data): float
+    {
+        if (count($data) < 6) return 1.0;
+
+        $n = count($data);
+        $firstHalf = array_sum(array_slice($data, 0, floor($n / 2))) / floor($n / 2);
+        $secondHalf = array_sum(array_slice($data, floor($n / 2))) / ceil($n / 2);
+
+        if ($firstHalf == 0) return 1.0;
+
+        $trend = $secondHalf / $firstHalf;
+        return max(0.95, min(1.05, $trend));
+    }
+
+    /**
+     * Расчет сезонного фактора
+     */
+    private function calculateSeasonalFactor(array $data): float
+    {
+        if (count($data) < 24) return 1.0;
+
+        $currentMonth = Carbon::now()->month;
+        $currentYear = Carbon::now()->year;
+
+        $thisYearAvg = 0;
+        $lastYearAvg = 0;
+        $count = 0;
+
+        for ($i = 0; $i < 12; $i++) {
+            $date = Carbon::create($currentYear - 1, $i + 1, 1);
+            $amount = $this->getMonthlyExpenseAmount($userId ?? 0, $date->year, $date->month);
+            if ($amount > 0) {
+                $lastYearAvg += $amount;
+                $count++;
+            }
+        }
+        $lastYearAvg = $lastYearAvg / max(1, $count);
+
+        if ($lastYearAvg == 0) return 1.0;
+
+        $currentMonthAmount = $this->getMonthlyExpenseAmount($userId ?? 0, $currentYear - 1, $currentMonth);
+        return $currentMonthAmount / $lastYearAvg;
+    }
+
+    /**
+     * Метрики качества модели (MAPE, MSE, RMSE)
+     */
+    private function calculateModelMetrics(array $historical, array $forecast): array
+    {
+        if (empty($historical) || empty($forecast)) {
+            return ['mape' => 0, 'mse' => 0, 'rmse' => 0];
+        }
+
+        $n = min(count($historical), count($forecast));
+        $mapeSum = 0;
+        $mseSum = 0;
+
+        for ($i = 0; $i < $n; $i++) {
+            $actual = $historical[count($historical) - $n + $i];
+            $predicted = $forecast[$i];
+
+            if ($actual > 0) {
+                $mapeSum += abs(($actual - $predicted) / $actual);
+            }
+            $mseSum += pow($actual - $predicted, 2);
+        }
+
+        $mape = $n > 0 ? ($mapeSum / $n) * 100 : 0;
+        $mse = $n > 0 ? $mseSum / $n : 0;
+        $rmse = sqrt($mse);
+
+        return [
+            'mape' => round($mape, 1),
+            'mse' => round($mse, 2),
+            'rmse' => round($rmse, 2),
+            'interpretation' => $mape < 10 ? 'Высокая точность' : ($mape < 20 ? 'Хорошая точность' : 'Приемлемая точность')
+        ];
     }
 
     // ==================== КОЭФФИЦИЕНТЫ ДНЕЙ НЕДЕЛИ ====================
 
-    /**
-     * Вычисление индивидуальных коэффициентов дней недели из истории пользователя
-     *
-     * Алгоритм:
-     * 1. Собираем все транзакции за последние 3 месяца
-     * 2. Группируем по дням недели
-     * 3. Вычисляем среднюю сумму трат для каждого дня
-     * 4. Нормализуем относительно среднего (чтобы базовый коэффициент был 1.0)
-     */
     private function calculateDayOfWeekFactors(int $userId): array
     {
-        // Коэффициенты по умолчанию (если недостаточно данных)
         $defaultFactors = [0 => 1.0, 1 => 0.9, 2 => 0.9, 3 => 0.9, 4 => 1.2, 5 => 1.1, 6 => 1.3];
 
         $startDate = Carbon::now()->subMonths(3);
         $endDate = Carbon::now();
 
-        // Получаем все транзакции за последние 3 месяца
         $transactions = Transaction::where('user_id', $userId)
             ->where('type', 'expense')
             ->whereBetween('date', [$startDate, $endDate])
             ->get();
 
-        if ($transactions->count() < 10) {
-            return $defaultFactors;
-        }
+        if ($transactions->count() < 10) return $defaultFactors;
 
         $baseCurrency = Currency::where('code', 'BYN')->first();
-        if (!$baseCurrency) {
-            return $defaultFactors;
-        }
+        if (!$baseCurrency) return $defaultFactors;
 
         $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
 
-        // Суммы по дням недели
         $dailyTotals = array_fill(0, 7, 0.0);
         $dailyCounts = array_fill(0, 7, 0);
 
         foreach ($transactions as $transaction) {
             $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
             $dayOfWeek = Carbon::parse($transaction->date)->dayOfWeek;
-
             $dailyTotals[$dayOfWeek] += $amountInBase;
             $dailyCounts[$dayOfWeek]++;
         }
 
-        // Вычисляем среднее для каждого дня
         $dailyAverages = [];
         for ($i = 0; $i < 7; $i++) {
             $dailyAverages[$i] = $dailyCounts[$i] > 0 ? $dailyTotals[$i] / $dailyCounts[$i] : 0;
         }
 
-        // Вычисляем общее среднее (только по дням, где есть данные)
         $totalAverage = 0;
         $daysWithData = 0;
         for ($i = 0; $i < 7; $i++) {
@@ -681,7 +839,6 @@ class AnalyticsController extends Controller
         }
         $totalAverage = $daysWithData > 0 ? $totalAverage / $daysWithData : 1.0;
 
-        // Нормализуем и ограничиваем разумными пределами
         $factors = [];
         for ($i = 0; $i < 7; $i++) {
             if ($dailyAverages[$i] > 0 && $totalAverage > 0) {
@@ -700,37 +857,62 @@ class AnalyticsController extends Controller
         return ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'][$dayOfWeek] ?? '';
     }
 
+    // ==================== ПРОГНОЗ ПО КАТЕГОРИЯМ ====================
+
+    private function getCategoryForecasts(int $userId, float $dailyBaseline, float $seasonalFactor, float $trend): array
+    {
+        $categories = Category::where('user_id', $userId)->where('type', 'expense')->get();
+        $forecasts = [];
+
+        foreach ($categories as $category) {
+            $lastCompleteMonth = Carbon::now()->subMonth()->startOfMonth();
+            $categoryBaseline = $this->getCategoryMonthlyExpense($userId, $category->id, $lastCompleteMonth->year, $lastCompleteMonth->month);
+            $categoryDailyBaseline = $categoryBaseline / $lastCompleteMonth->daysInMonth;
+
+            if ($categoryDailyBaseline <= 0) continue;
+
+            $categoryTotal = $categoryDailyBaseline * 30 * $seasonalFactor * $trend;
+
+            $forecasts[] = [
+                'category_id' => $category->id,
+                'category_name' => $category->name,
+                'color' => $category->color ?? '#3498db',
+                'forecast' => round($categoryTotal, 2),
+                'daily_average' => round($categoryTotal / 30, 2),
+                'share_percent' => $dailyBaseline > 0 ? round(($categoryDailyBaseline / $dailyBaseline) * 100, 1) : 0
+            ];
+        }
+
+        usort($forecasts, fn($a, $b) => $b['forecast'] <=> $a['forecast']);
+        return array_slice($forecasts, 0, 10);
+    }
+
+    private function getCategoryMonthlyExpense(int $userId, int $categoryId, int $year, int $month): float
+    {
+        $transactions = Transaction::where('user_id', $userId)->where('type', 'expense')
+            ->whereHas('categories', fn($q) => $q->where('categories.id', $categoryId))
+            ->with(['currency'])->whereYear('date', $year)->whereMonth('date', $month)->get();
+        $baseCurrency = Currency::where('code', 'BYN')->first();
+        if (!$baseCurrency) return 0;
+        $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
+        $total = 0;
+        foreach ($transactions as $transaction) {
+            $total += $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
+        }
+        return $total;
+    }
+
     // ==================== ДОВЕРИТЕЛЬНЫЙ ИНТЕРВАЛ ====================
 
-    /**
-     * Доверительный интервал с учетом горизонта прогноза
-     *
-     * Формула: errorMargin = min(0.5, CV × √(горизонт/30))
-     *
-     * Где:
-     * - CV — коэффициент вариации (характеризует стабильность расходов)
-     * - горизонт — количество прогнозируемых дней (30)
-     * - √(горизонт/30) — множитель, учитывающий рост ошибки с горизонтом
-     *
-     * При горизонте 30 дней множитель = 1
-     * При горизонте 15 дней множитель = 0.71 (ошибка меньше)
-     * При горизонте 60 дней множитель = 1.41 (ошибка больше)
-     */
     private function getPredictionInterval(int $userId, float $forecast, int $horizonDays = 30): array
     {
-        $monthlyExpenses = $this->getMonthlyExpenses($userId, Carbon::now()->subMonths(12), Carbon::now());
+        $monthlyExpenses = $this->getMonthlyExpensesArray($userId, 12);
         $cv = $this->calculateCoefficientOfVariation($monthlyExpenses);
 
-        // Множитель для горизонта прогноза (ошибка растет как корень из времени)
         $horizonMultiplier = sqrt($horizonDays / 30);
-
-        // Базовый запас ошибки: CV, но не более 50%
         $baseErrorMargin = min(0.5, $cv);
-
-        // Итоговая ошибка с учетом горизонта
         $errorMargin = min(0.7, $baseErrorMargin * $horizonMultiplier);
 
-        // Для очень малого горизонта (менее 7 дней) можно немного уменьшить
         if ($horizonDays < 7) {
             $errorMargin = $errorMargin * 0.8;
         }
@@ -746,6 +928,7 @@ class AnalyticsController extends Controller
 
     private function calculateCoefficientOfVariation(array $values): float
     {
+        $values = array_filter($values, fn($v) => $v > 0);
         $n = count($values);
         if ($n < 3) return 0.5;
         $mean = array_sum($values) / $n;
@@ -753,174 +936,6 @@ class AnalyticsController extends Controller
         $variance = array_sum(array_map(fn($x) => pow($x - $mean, 2), $values)) / $n;
         $stdDev = sqrt($variance);
         return $stdDev / $mean;
-    }
-
-    // ==================== ДЕТЕКЦИЯ АНОМАЛИЙ В РЕФЕРЕНТНЫХ ПЕРИОДАХ ====================
-
-    private function filterAnomalyPeriods(array $periods, array $values): array
-    {
-        if (count($values) < 3) return [$periods, []];
-        sort($values);
-        $q1 = $values[floor(count($values) * 0.25)];
-        $q3 = $values[floor(count($values) * 0.75)];
-        $iqr = $q3 - $q1;
-        $lowerBound = $q1 - 1.5 * $iqr;
-        $upperBound = $q3 + 1.5 * $iqr;
-
-        $filtered = [];
-        $anomalies = [];
-        foreach ($periods as $index => $period) {
-            if ($period['value'] < $lowerBound || $period['value'] > $upperBound) {
-                $anomalies[] = $period['source'];
-            } else {
-                $filtered[] = $period;
-            }
-        }
-        return [empty($filtered) ? $periods : $filtered, $anomalies];
-    }
-
-    // ==================== ОСНОВНОЙ ПРОГНОЗ НА 30 ДНЕЙ ====================
-
-    public function forecastNext30Days(Request $request): \Illuminate\Http\JsonResponse
-    {
-        try {
-            $userId = $this->getUserId();
-            if (!Transaction::where('user_id', $userId)->exists()) {
-                return response()->json(['status' => 'success', 'data' => ['has_data' => false, 'message' => 'Нет данных для прогноза. Добавьте транзакции.']]);
-            }
-
-            $now = Carbon::now();
-            $startDate = $now->copy();
-            $endDate = $now->copy()->addDays(29);
-
-            // 1. Базовый среднедневной расход
-            $lastCompleteMonth = $now->copy()->subMonth()->startOfMonth();
-            $baselineTotal = $this->getMonthlyExpenseAmount($userId, $lastCompleteMonth->year, $lastCompleteMonth->month);
-            $dailyBaseline = $this->getFilteredDailyBaseline($userId);
-
-            // 2. Коэффициенты дней недели
-            $dayOfWeekFactors = $this->calculateDayOfWeekFactors($userId);
-
-            // 3. Сезонный коэффициент с детекцией аномалий
-            $seasonalFactor = $this->getCalendarAdjustedFactorWithAnomalyDetection($userId, $startDate, $endDate);
-
-            // 4. Коэффициент тренда
-            $trend = $this->calculateTrend($userId);
-
-            // 5. Прогноз на каждый день
-            $dailyForecasts = [];
-            $totalForecast = 0;
-            $currentDate = $startDate->copy();
-
-            for ($i = 0; $i < 30; $i++) {
-                $dayOfWeek = $currentDate->dayOfWeek;
-                $dayFactor = $dayOfWeekFactors[$dayOfWeek] ?? 1.0;
-                $dailyForecast = $dailyBaseline * $dayFactor * $seasonalFactor * $trend;
-                $dailyForecasts[] = [
-                    'date' => $currentDate->format('Y-m-d'),
-                    'day_of_week' => $this->getRussianDayOfWeek($currentDate->dayOfWeek),
-                    'forecast' => round($dailyForecast, 2)
-                ];
-                $totalForecast += $dailyForecast;
-                $currentDate->addDay();
-            }
-
-            // 6. Доверительный интервал
-            $interval = $this->getPredictionInterval($userId, $totalForecast, 30);
-
-            // 7. Прогноз по категориям
-            $categoryForecasts = $this->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $trend);
-
-            // 8. Confidence
-            $confidence = $this->calculateConfidence($userId);
-
-            return response()->json([
-                'status' => 'success',
-                'data' => [
-                    'has_data' => true,
-                    'period' => ['start' => $startDate->format('Y-m-d'), 'end' => $endDate->format('Y-m-d'), 'days' => 30],
-                    'total_forecast' => round($totalForecast, 2),
-                    'daily_average' => round($totalForecast / 30, 2),
-                    'daily_forecasts' => $dailyForecasts,
-                    'category_forecasts' => $categoryForecasts,
-                    'confidence_interval' => $interval,
-                    'trend_factor' => round($trend, 3),
-                    'seasonal_factor' => round($seasonalFactor, 2),
-                    'confidence' => $confidence['percent'],
-                    'confidence_level' => $confidence['level'],
-                    'confidence_text' => $confidence['text']
-                ]
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Forecast30Days error: ' . $e->getMessage());
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
-        }
-    }
-
-    private function getCalendarAdjustedFactorWithAnomalyDetection(int $userId, Carbon $startDate, Carbon $endDate): float
-    {
-        $targetStart = clone $startDate;
-        $targetEnd = clone $endDate;
-
-        $refPeriods = [
-            ['value' => $this->getExpensesForPeriod($userId, $targetStart->copy()->subYear(), $targetEnd->copy()->subYear()), 'weight' => 0.6, 'source' => 'same_period'],
-            ['value' => $this->getExpensesForPeriod($userId, $targetStart->copy()->subYear()->subMonth(), $targetEnd->copy()->subYear()->subMonth()), 'weight' => 0.3, 'source' => 'prev_month'],
-            ['value' => $this->getExpensesForPeriod($userId, $targetStart->copy()->subYear()->addMonth(), $targetEnd->copy()->subYear()->addMonth()), 'weight' => 0.1, 'source' => 'next_month'],
-        ];
-
-        $values = array_column($refPeriods, 'value');
-        list($filteredPeriods, $anomalies) = $this->filterAnomalyPeriods($refPeriods, $values);
-
-        if (count($filteredPeriods) < 2) {
-            return $this->getWeightedSeasonalCoefficients($userId)[$startDate->month] ?? 1.0;
-        }
-
-        $totalWeight = array_sum(array_column($filteredPeriods, 'weight'));
-        $expectedPeriodExpense = 0;
-        foreach ($filteredPeriods as $period) {
-            $expectedPeriodExpense += ($period['value'] * ($period['weight'] / $totalWeight));
-        }
-
-        $lastCompleteMonth = Carbon::now()->subMonth()->startOfMonth();
-        $baselineTotal = $this->getMonthlyExpenseAmount($userId, $lastCompleteMonth->year, $lastCompleteMonth->month);
-        $baselineDaily = $baselineTotal / $lastCompleteMonth->daysInMonth;
-        $expectedDailyFromRef = $expectedPeriodExpense / 30;
-
-        if ($baselineDaily > 0) {
-            return max(0.5, min(1.8, $expectedDailyFromRef / $baselineDaily));
-        }
-        return 1.0;
-    }
-
-    // ==================== ПРОГНОЗ ПО КАТЕГОРИЯМ ====================
-
-    private function getCategoryForecasts(int $userId, float $dailyBaseline, float $seasonalFactor, float $trend): array
-    {
-        $categories = Category::where('user_id', $userId)->where('type', 'expense')->get();
-        $forecasts = [];
-
-        foreach ($categories as $category) {
-            $lastCompleteMonth = Carbon::now()->subMonth()->startOfMonth();
-            $categoryBaseline = $this->getCategoryMonthlyExpense($userId, $category->id, $lastCompleteMonth->year, $lastCompleteMonth->month);
-            $categoryDailyBaseline = $categoryBaseline / $lastCompleteMonth->daysInMonth;
-
-            if ($categoryDailyBaseline <= 0) continue;
-
-            $categorySeasonalFactor = $this->getCategorySeasonalFactor($userId, $category->id, Carbon::now()->month);
-            $totalForecast = $categoryDailyBaseline * 30 * $categorySeasonalFactor * $trend;
-
-            $forecasts[] = [
-                'category_id' => $category->id,
-                'category_name' => $category->name,
-                'color' => $category->color ?? '#3498db',
-                'forecast' => round($totalForecast, 2),
-                'daily_average' => round($totalForecast / 30, 2),
-                'share_percent' => $dailyBaseline > 0 ? round(($categoryDailyBaseline / $dailyBaseline) * 100, 1) : 0
-            ];
-        }
-
-        usort($forecasts, fn($a, $b) => $b['forecast'] <=> $a['forecast']);
-        return array_slice($forecasts, 0, 10);
     }
 
     // ==================== CONFIDENCE SCORE ====================
@@ -933,14 +948,10 @@ class AnalyticsController extends Controller
         $monthsOfData = Carbon::parse($oldest->date)->diffInMonths(Carbon::now());
         $monthsScore = $this->calculateMonthsScore($monthsOfData);
 
-        $monthlyExpenses = $this->getMonthlyExpenses($userId, Carbon::now()->subMonths(12), Carbon::now());
+        $monthlyExpenses = $this->getMonthlyExpensesArray($userId, 12);
         $stabilityScore = $this->calculateStabilityScore($monthlyExpenses);
 
-        $coeffs = $this->getWeightedSeasonalCoefficients($userId);
-        $uniqueCoeffs = count(array_unique($coeffs));
-        $seasonalScore = min(100, ($uniqueCoeffs / 12) * 100);
-
-        $totalScore = ($monthsScore * 0.4) + ($stabilityScore * 0.35) + ($seasonalScore * 0.25);
+        $totalScore = ($monthsScore * 0.5) + ($stabilityScore * 0.5);
         $totalScore = round(min(100, max(0, $totalScore)));
 
         if ($totalScore >= 70) return ['percent' => $totalScore, 'level' => 'high', 'text' => 'Высокая надежность. Прогноз статистически значим.'];
@@ -954,83 +965,14 @@ class AnalyticsController extends Controller
         return min(100, 100 * (1 - 1 / sqrt($months)));
     }
 
-    /**
-     * Расчет базового среднедневного расхода с фильтрацией аномалий
-     *
-     * Алгоритм:
-     * 1. Берем расходы за последние 3 полных месяца
-     * 2. Отфильтровываем аномальные месяцы (IQR метод)
-     * 3. Берем медиану оставшихся месяцев
-     * 4. Делим на количество дней в месяце
-     */
-    private function getFilteredDailyBaseline(int $userId): float
-    {
-        $now = Carbon::now();
-        $monthlyTotals = [];
-        $monthDays = [];
-
-        // Собираем данные за последние 3 полных месяца
-        for ($i = 1; $i <= 3; $i++) {
-            $monthDate = $now->copy()->subMonths($i);
-            $expenses = $this->getMonthlyExpenseAmount($userId, $monthDate->year, $monthDate->month);
-            if ($expenses > 0) {
-                $monthlyTotals[] = $expenses;
-                $monthDays[] = $monthDate->daysInMonth;
-            }
-        }
-
-        if (count($monthlyTotals) < 2) {
-            // Недостаточно данных — используем метод с последним полным месяцем
-            $lastCompleteMonth = $now->copy()->subMonth()->startOfMonth();
-            $baselineTotal = $this->getMonthlyExpenseAmount($userId, $lastCompleteMonth->year, $lastCompleteMonth->month);
-            return $baselineTotal / $lastCompleteMonth->daysInMonth;
-        }
-
-        // Фильтрация аномалий (IQR метод)
-        $filteredTotals = $this->filterAnomaliesFromArray($monthlyTotals);
-
-        if (count($filteredTotals) < 1) {
-            $filteredTotals = $monthlyTotals;
-        }
-
-        // Медиана
-        $medianTotal = $this->calculateMedian($filteredTotals);
-
-        // Среднее количество дней в месяце (для расчета дневного расхода)
-        $avgDays = array_sum($monthDays) / count($monthDays);
-
-        return $medianTotal / $avgDays;
-    }
-
-    /**
-     * Фильтрация аномалий из простого массива (IQR метод)
-     */
-    private function filterAnomaliesFromArray(array $values): array
-    {
-        if (count($values) < 3) {
-            return $values;
-        }
-
-        $sorted = $values;
-        sort($sorted);
-        $q1 = $sorted[floor(count($sorted) * 0.25)];
-        $q3 = $sorted[floor(count($sorted) * 0.75)];
-        $iqr = $q3 - $q1;
-        $lowerBound = $q1 - 1.5 * $iqr;
-        $upperBound = $q3 + 1.5 * $iqr;
-
-        return array_values(array_filter($values, function($value) use ($lowerBound, $upperBound) {
-            return $value >= $lowerBound && $value <= $upperBound;
-        }));
-    }
-
     private function calculateStabilityScore(array $monthlyExpenses): float
     {
-        $n = count($monthlyExpenses);
+        $values = array_filter($monthlyExpenses, fn($v) => $v > 0);
+        $n = count($values);
         if ($n < 3) return 0;
-        $mean = array_sum($monthlyExpenses) / $n;
+        $mean = array_sum($values) / $n;
         if ($mean == 0) return 0;
-        $variance = array_sum(array_map(fn($x) => pow($x - $mean, 2), $monthlyExpenses)) / $n;
+        $variance = array_sum(array_map(fn($x) => pow($x - $mean, 2), $values)) / $n;
         $stdDev = sqrt($variance);
         $cv = $stdDev / $mean;
         return 100 * exp(-2 * $cv);
