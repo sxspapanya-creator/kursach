@@ -45,6 +45,8 @@ Route::group(['middleware' => [UserPermissionMiddleware::class]], function () {
     Route::get('/analytics/overview', [AnalyticsController::class, 'overview']);
     Route::get('/analytics/financial-health', [AnalyticsController::class, 'financialHealth']);
     Route::get('/analytics/monthly-trends', [AnalyticsController::class, 'monthlyTrends']);
+    Route::get('/analytics/forecast/next-month', [AnalyticsController::class, 'forecastNextMonth']);
+    Route::get('/analytics/forecast/30-days', [AnalyticsController::class, 'forecastNext30Days']);
 });
 
 Route::get('/currencies', [CurrencyController::class, 'index']);
