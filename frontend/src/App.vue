@@ -191,6 +191,21 @@ export default {
       userCacheVersion.value++
     }
 
+    const syncWithApi = async () => {
+      try {
+        const response = await fetch('/auth/user', {
+          credentials: 'include'
+        })
+        const data = await response.json()
+        if (data.authenticated && data.user && !localStorage.getItem('user')) {
+          localStorage.setItem('user', JSON.stringify(data.user))
+          isAuthenticated.value = true
+          userCacheVersion.value++
+          console.log('Синхронизировано с API')
+        }
+      } catch(e) {}
+    }
+
     const handleUserUpdated = () => {
       bumpUserFromStorage()
     }
@@ -203,6 +218,7 @@ export default {
 
     onMounted(() => {
       bumpUserFromStorage()
+      syncWithApi()
 
       window.addEventListener('user-updated', handleUserUpdated)
       window.addEventListener('user-logout', handleUserLogout)

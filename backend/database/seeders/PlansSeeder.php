@@ -30,7 +30,7 @@ class PlansSeeder extends Seeder
         Plan::create([
             'name' => 'Премиум',
             'description' => 'Премиум тариф',
-            'price' => 15,
+            'price' => 32,
             'currency_id' => Currency::first()->id,
             'code' => PlanCodeEnum::PREMIUM,
             'type' => PlanTypeEnum::MONTHLY,
@@ -39,7 +39,7 @@ class PlansSeeder extends Seeder
         Plan::create([
             'name' => 'Премиум',
             'description' => 'Премиум тариф',
-            'price' => 120,
+            'price' => 384,
             'currency_id' => Currency::first()->id,
             'code' => PlanCodeEnum::PREMIUM,
             'type' => PlanTypeEnum::YEARLY,

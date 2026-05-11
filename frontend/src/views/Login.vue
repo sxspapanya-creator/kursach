@@ -183,10 +183,11 @@ export default {
 
           if (userResponse.ok) {
             const userData = await userResponse.json()
+            console.log('🔵 userData получен:', userData)  // ДОБАВЬТЕ ЭТУ СТРОЧКУ
             if (userData.authenticated && userData.user) {
-              // Сохраняем данные пользователя
               localStorage.setItem('user', JSON.stringify(userData.user))
-              console.log('Пользователь сохранен:', userData.user)
+              console.log('✅ Пользователь сохранен в localStorage')  // ДОБАВЬТЕ ЭТУ СТРОЧКУ
+              console.log('🔍 Проверка:', localStorage.getItem('user'))  // ДОБАВЬТЕ ЭТУ СТРОЧКУ
               
               // Редирект на главную
               console.log('Логин успешен, выполняю редирект на /')
