@@ -19,8 +19,13 @@ class DatabaseSeeder extends Seeder
             'email' => 'test@example.com',
         ]);
 
-        // Запускаем seeder для тестовых данных аналитики
         $this->call([
+            FifteenMonthsDataSeeder::class,
+            ElevenMonthsDataSeeder::class,
+            SixMonthsDataSeeder::class,
+            EightMonthsDataSeeder::class,
+            SevenMonthsDataSeeder::class,
+            TwentyMonthsDataSeeder::class,
             AnalyticsTestDataSeeder::class,
             PlansSeeder::class
         ]);
