@@ -496,10 +496,12 @@
     font-weight: 600;
 }
 
-/* Action Buttons */
+/* Action Buttons — отдельная колонка справа от суммы */
 .transaction-actions {
     display: flex;
     gap: 0.5rem;
+    flex-shrink: 0;
+    align-self: center;
 }
 
 .action-btn {
@@ -590,8 +592,16 @@
     .transaction-amount-container {
         width: 100%;
         flex-direction: row;
-        justify-content: space-between;
+        justify-content: flex-end;
         align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .transaction-actions {
+        width: 100%;
+        justify-content: flex-end;
+        align-self: flex-end;
     }
 
     .transaction-meta {

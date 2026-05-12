@@ -187,6 +187,9 @@
           <div class="form-group">
             <label class="form-label">Период (опционально)</label>
             <input type="month" v-model="categoryPeriod.month" class="form-input">
+            <p class="field-hint muted">
+              Если месяц выбран, ищутся только транзакции за этот месяц. Очистите поле, чтобы взять все даты.
+            </p>
           </div>
 
           <div class="form-actions">
@@ -557,6 +560,23 @@ export default {
       }
     }
 
+    /** Laravel ожидает category_ids[] в query; стандартная сериализация axios для GET часто ломает массив. */
+    const buildTransactionsQueryString = (opts) => {
+      const sp = new URLSearchParams()
+      if (opts.fetch_all) sp.set('fetch_all', '1')
+      if (opts.type) sp.set('type', opts.type)
+      if (opts.date_from) sp.set('date_from', opts.date_from)
+      if (opts.date_to) sp.set('date_to', opts.date_to)
+      if (opts.year != null && opts.year !== '') sp.set('year', String(opts.year))
+      if (opts.month != null && opts.month !== '') sp.set('month', String(opts.month))
+      if (opts.category_ids?.length) {
+        for (const id of opts.category_ids) {
+          sp.append('category_ids[]', String(id))
+        }
+      }
+      return sp.toString()
+    }
+
     // Предпросмотр по датам
     const previewByDate = async () => {
       if (isDateSelectionUnavailable.value) {
@@ -569,7 +589,7 @@ export default {
         loading.value = true
         error.value = ''
 
-        let params = { limit: 1000 }
+        let params = { fetch_all: true }
 
         if (dateSelectionType.value === 'range') {
           params.date_from = dateRange.value.from
@@ -605,15 +625,18 @@ export default {
         loading.value = true
         error.value = ''
 
-        let params = { limit: 1000, category_ids: selectedCategories.value }
-
+        const opts = {
+          fetch_all: true,
+          category_ids: selectedCategories.value
+        }
         if (categoryPeriod.value.month) {
           const [year, month] = categoryPeriod.value.month.split('-')
-          params.year = parseInt(year)
-          params.month = parseInt(month)
+          opts.year = parseInt(year, 10)
+          opts.month = parseInt(month, 10)
         }
 
-        const response = await axios.get('/api/transactions', { params })
+        const qs = buildTransactionsQueryString(opts)
+        const response = await axios.get(`/api/transactions?${qs}`)
         previewTransactions.value = response.data.data || []
         previewLoaded.value = true
 
@@ -635,7 +658,7 @@ export default {
         loading.value = true
         error.value = ''
 
-        let params = { limit: 1000, type: deleteType.value }
+        let params = { fetch_all: true, type: deleteType.value }
 
         if (typePeriod.value.month) {
           const [year, month] = typePeriod.value.month.split('-')
@@ -938,6 +961,13 @@ export default {
 
 .field-hint.error {
   color: #ef4444;
+}
+
+.field-hint.muted {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin: 0.375rem 0 0;
+  line-height: 1.4;
 }
 
 .form-actions {

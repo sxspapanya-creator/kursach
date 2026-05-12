@@ -21,6 +21,77 @@ class AnalyticsController extends Controller
         return $userId;
     }
 
+    public function monthlyTrends(Request $request): \Illuminate\Http\JsonResponse
+    {
+        try {
+            $userId = $this->getUserId();
+            $months = (int) $request->input('months', 12);
+
+            $baseCurrency = Currency::where('code', 'BYN')->first();
+            if (!$baseCurrency) {
+                return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
+            }
+
+            // Получаем транзакции сгруппированные по месяцам
+            $startDate = Carbon::now()->subMonths($months - 1)->startOfMonth();
+
+            $transactions = Transaction::where('user_id', $userId)
+                ->with(['currency'])
+                ->where('date', '>=', $startDate)
+                ->get();
+
+            // Группируем по месяцам
+            $grouped = $transactions->groupBy(fn($t) => $t->date->format('Y-m'));
+
+            $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
+
+            $trends = [];
+            $currentDate = Carbon::now();
+
+            for ($i = $months - 1; $i >= 0; $i--) {
+                $date = $currentDate->copy()->subMonths($i);
+                $monthKey = $date->format('Y-m');
+
+                $monthTransactions = $grouped[$monthKey] ?? collect();
+
+                $income = 0;
+                $expense = 0;
+
+                foreach ($monthTransactions as $transaction) {
+                    $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
+
+                    if ($transaction->type === 'income') {
+                        $income += $amountInBase;
+                    } else {
+                        $expense += $amountInBase;
+                    }
+                }
+
+                $trends[] = [
+                    'month' => $monthKey,
+                    'month_label' => $date->translatedFormat('F Y'),
+                    'income' => round($income, 2),
+                    'expense' => round($expense, 2),
+                    'balance' => round($income - $expense, 2),
+                    'savings_rate' => $income > 0 ? round((($income - $expense) / $income) * 100, 1) : 0
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'trends' => $trends,
+                    'base_currency' => $baseCurrency->code,
+                    'period_months' => $months
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('MonthlyTrends error: ' . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => 'Ошибка: ' . $e->getMessage()], 500);
+        }
+    }
+
     // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ КУРСОВ ВАЛЮТ ====================
 
     private function loadRatesForTransactions(Collection $transactions, Currency $baseCurrency): array
@@ -415,6 +486,7 @@ class AnalyticsController extends Controller
      */
     private function holtWinters(array $data, int $seasonalPeriod = 12, int $forecastSteps = 6): array
     {
+
         $n = count($data);
         if ($n < $seasonalPeriod * 2) {
             // Недостаточно данных — используем простой метод

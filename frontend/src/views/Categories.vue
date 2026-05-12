@@ -389,21 +389,25 @@
           </div>
 
           <div class="category-footer">
-            <div class="transaction-info">
-              <span class="transaction-date">
-                Последняя транзакция : {{ formatDate(category.last_transaction_date) }}
-              </span>
+            <div class="category-footer-left">
+              <div v-if="category.last_transaction_date" class="transaction-info">
+                <span class="transaction-date">
+                  Последняя транзакция: {{ formatDate(category.last_transaction_date) }}
+                </span>
+              </div>
             </div>
-            <button
-                v-if="(category.transaction_count || 0) === 0"
-                @click.stop="promptDelete(category)"
-                class="delete-btn"
-                title="Удалить"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-              </svg>
-            </button>
+            <div class="category-footer-right">
+              <button
+                  v-if="(category.all_time_count || 0) === 0"
+                  @click.stop="promptDelete(category)"
+                  class="delete-btn"
+                  title="Удалить"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -420,7 +424,7 @@
           </svg>
         </div>
         <div class="error-content">
-          <div class="error-title">Ошибка</div>
+          <div class="error-title">Ошибка, невозможно удалить категорию в которой есть транзакции</div>
           <div class="error-message">{{ error }}</div>
         </div>
         <button @click="error = ''" class="error-close">
@@ -487,6 +491,7 @@ export default {
             ...category,
             total_amount: category.total_amount || 0,
             transaction_count: category.transaction_count || 0,
+            all_time_count: category.all_time_count ?? 0,
             currency_stats: category.currency_stats || [],
             last_transaction_date: category.last_transaction_date
           }
@@ -512,6 +517,7 @@ export default {
           color: c.color || colorOptions[c.type === 'income' ? 1 : 3],
           budget_limit: c.budget_limit || null,
           transaction_count: c.transaction_count || 0,
+          all_time_count: c.all_time_count ?? 0,
           total_amount: Math.abs(c.total_amount || 0),
           currency_stats: c.currency_stats || [],
           last_transaction_date: c.last_transaction_date,
@@ -545,7 +551,7 @@ export default {
     const openEditForm = (category) => {
       isEditing.value = true
       editingId.value = category.id
-      hasTransactions.value = (category.transaction_count || 0) > 0
+      hasTransactions.value = (category.all_time_count || 0) > 0
       formErrors.value = {}
       formData.value = { ...category }
       showModal.value = true
@@ -614,7 +620,7 @@ export default {
     }
 
     const promptDelete = (category) => {
-      if ((category.transaction_count || 0) > 0) {
+      if ((category.all_time_count || 0) > 0) {
         error.value = 'Нельзя удалить категорию с транзакциями'
         setTimeout(() => { error.value = '' }, 3000)
         return

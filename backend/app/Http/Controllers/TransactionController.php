@@ -9,6 +9,7 @@ use App\Models\CurrencyRate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use App\Services\TransactionCategorizer;
 
@@ -28,13 +29,19 @@ class TransactionController extends Controller
             $validated = $request->validate([
                 'type' => 'nullable|in:income,expense',
                 'category_ids' => 'nullable|array',
-                'category_ids.*' => 'integer|exists:categories,id',
+                'category_ids.*' => [
+                    'integer',
+                    Rule::exists('categories', 'id')->where(fn ($q) => $q->where('user_id', $userId)),
+                ],
                 'month' => 'nullable|integer|min:1|max:12',
                 'year' => 'nullable|integer|min:2000|max:2100',
                 'date_from' => 'nullable|date',
                 'date_to' => 'nullable|date|after_or_equal:date_from',
-                'limit' => 'nullable|integer|min:1|max:10000'
+                'limit' => 'nullable|integer|min:1|max:10000',
             ]);
+
+            // Нельзя валидировать fetch_all правилом boolean: в query приходит строка "true", она не проходит validateBoolean (принимаются только 0/1 и т.д.) → 422.
+            $fetchAll = $request->boolean('fetch_all');
 
             $query = Transaction::where('user_id', $userId)->with(['categories', 'currency']);
 
@@ -43,20 +50,13 @@ class TransactionController extends Controller
                 $query->where('type', $validated['type']);
             }
 
-            // Фильтрация по категориям (многие ко многим)
-            if (isset($validated['category_ids']) && !empty($validated['category_ids'])) {
-                $categoryIds = $validated['category_ids'];
-
-                $validCategoryIds = Category::where('user_id', $userId)
-                    ->whereIn('id', $categoryIds)
-                    ->pluck('id')
-                    ->toArray();
-
-                if (!empty($validCategoryIds)) {
-                    $query->whereHas('categories', function($q) use ($validCategoryIds) {
-                        $q->whereIn('categories.id', $validCategoryIds);
-                    });
-                }
+            // Фильтрация по категориям (многие ко многим): транзакция попадает в выборку,
+            // если у неё есть хотя бы одна из выбранных категорий (OR).
+            if (!empty($validated['category_ids'])) {
+                $categoryIds = array_values(array_unique($validated['category_ids']));
+                $query->whereHas('categories', function ($q) use ($categoryIds) {
+                    $q->whereIn('categories.id', $categoryIds);
+                });
             }
 
             // Фильтрация по месяцу
@@ -80,10 +80,12 @@ class TransactionController extends Controller
 
             $limit = $validated['limit'] ?? 50;
 
-            $transactions = $query->orderBy('date', 'desc')
-                ->orderBy('created_at', 'desc')
-                ->take($limit)
-                ->get();
+            $ordered = $query->orderBy('date', 'desc')
+                ->orderBy('created_at', 'desc');
+
+            $transactions = $fetchAll
+                ? $ordered->get()
+                : $ordered->take($limit)->get();
 
             // Получаем базовую валюту BYN для конвертации
             $byn = Currency::where('code', 'BYN')->first();
@@ -119,7 +121,8 @@ class TransactionController extends Controller
                 'data' => $transactionsWithRates,
                 'meta' => [
                     'total' => $transactions->count(),
-                    'limit' => $limit
+                    'limit' => $fetchAll ? null : $limit,
+                    'fetch_all' => $fetchAll,
                 ]
             ]);
         } catch (ValidationException $e) {
