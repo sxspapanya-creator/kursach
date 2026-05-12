@@ -11,12 +11,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Carbon\Carbon;
 
-class SevenMonthsDataSeeder extends Seeder
+class ThreeMonthsDataSeeder extends Seeder
 {
     public function run(): void
     {
-        $totalMonths = 7;
-        $label = '7 месяцев';
+        $totalMonths = 3;
+        $label = '3 месяца';
 
         // Получаем или создаем пользователя
         $user = User::first();
@@ -108,14 +108,14 @@ class SevenMonthsDataSeeder extends Seeder
                 $seasonalIncomeFactor = 1.05;
             }
 
-            // Тренд роста за 7 месяцев (~3% всего)
-            $trendFactor = 1 + ($totalMonths - 1 - $monthOffset) * 0.0045;
+            // Тренд роста за 3 месяца (~1.5% всего)
+            $trendFactor = 1 + ($totalMonths - 1 - $monthOffset) * 0.005;
 
             // ========== ДОХОДЫ ==========
 
             // Зарплата
             $salary = round($baseIncome * $trendFactor * $seasonalIncomeFactor, 0);
-            $finalSalary = max(2500, round($salary * (1 + (rand(-20, 20) / 1000)), 2));
+            $finalSalary = max(2600, round($salary * (1 + (rand(-20, 20) / 1000)), 2));
 
             $transaction = Transaction::create([
                 'user_id' => $userId,
@@ -133,8 +133,8 @@ class SevenMonthsDataSeeder extends Seeder
             $transactionsCount++;
 
             // Фриланс
-            if (rand(1, 100) <= 65) {
-                $freelanceAmount = round(rand(200, 600) * $trendFactor * $seasonalIncomeFactor, 2);
+            if (rand(1, 100) <= 60) {
+                $freelanceAmount = round(rand(200, 550) * $trendFactor * $seasonalIncomeFactor, 2);
                 $transaction = Transaction::create([
                     'user_id' => $userId,
                     'amount' => $freelanceAmount,
@@ -152,8 +152,8 @@ class SevenMonthsDataSeeder extends Seeder
             }
 
             // Инвестиции
-            if (rand(1, 100) <= 40) {
-                $investmentAmount = round(rand(50, 300) * $trendFactor * $seasonalIncomeFactor, 2);
+            if (rand(1, 100) <= 35) {
+                $investmentAmount = round(rand(50, 250) * $trendFactor * $seasonalIncomeFactor, 2);
                 $transaction = Transaction::create([
                     'user_id' => $userId,
                     'amount' => $investmentAmount,
@@ -172,7 +172,7 @@ class SevenMonthsDataSeeder extends Seeder
 
             // Подарки
             if ($monthNumber == 12 || $monthNumber == 4) {
-                $giftAmount = rand(100, 400);
+                $giftAmount = rand(100, 350);
                 $transaction = Transaction::create([
                     'user_id' => $userId,
                     'amount' => $giftAmount,
@@ -223,7 +223,7 @@ class SevenMonthsDataSeeder extends Seeder
 
                 if ($categoryTotal <= 0) continue;
 
-                $transactionCount = rand(2, 7);
+                $transactionCount = rand(2, 6);
                 $remaining = $categoryTotal;
 
                 for ($i = 0; $i < $transactionCount; $i++) {
