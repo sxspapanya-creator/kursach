@@ -1,6 +1,6 @@
 <template>
   <div id="app">
-    <nav v-if="isAuthenticated" class="navbar">
+    <nav v-if="showNavbar" class="navbar">
       <div class="nav-container">
         <div class="nav-left">
           <div class="nav-brand">
@@ -137,6 +137,13 @@ export default {
 
     const hasPremiumPlan = computed(() => userData.value?.plan_code === 'premium')
 
+    const isGuestRoute = computed(() => {
+      const p = route.path
+      return p === '/login' || p === '/register'
+    })
+
+    const showNavbar = computed(() => isAuthenticated.value && !isGuestRoute.value)
+
     const showNotification = (type, message) => {
       notification.value = { show: true, type, message }
       setTimeout(() => {
@@ -197,13 +204,16 @@ export default {
           credentials: 'include'
         })
         const data = await response.json()
-        if (data.authenticated && data.user && !localStorage.getItem('user')) {
+        if (data.authenticated && data.user) {
           localStorage.setItem('user', JSON.stringify(data.user))
           isAuthenticated.value = true
           userCacheVersion.value++
-          console.log('Синхронизировано с API')
+        } else if (data.authenticated === false) {
+          localStorage.removeItem('user')
+          isAuthenticated.value = false
+          userCacheVersion.value++
         }
-      } catch(e) {}
+      } catch (e) { /* сеть / не JSON — не трогаем localStorage */ }
     }
 
     const handleUserUpdated = () => {
@@ -237,6 +247,7 @@ export default {
 
     return {
       isAuthenticated,
+      showNavbar,
       userInitials,
       userName,
       userEmail,
