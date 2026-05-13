@@ -22,6 +22,75 @@ class AnalyticsController extends Controller
         return $userId;
     }
 
+    public function monthlyTrends(Request $request): \Illuminate\Http\JsonResponse
+    {
+        try {
+            $userId = $this->getUserId();
+            $months = (int) $request->input('months', 12);
+
+            $baseCurrency = Currency::where('code', 'BYN')->first();
+            if (!$baseCurrency) {
+                return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
+            }
+
+            $startDate = Carbon::now()->subMonths($months - 1)->startOfMonth();
+
+            $transactions = Transaction::where('user_id', $userId)
+                ->with(['currency'])
+                ->where('date', '>=', $startDate)
+                ->get();
+
+            $grouped = $transactions->groupBy(fn($t) => $t->date->format('Y-m'));
+
+            $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
+
+            $trends = [];
+            $currentDate = Carbon::now();
+
+            for ($i = $months - 1; $i >= 0; $i--) {
+                $date = $currentDate->copy()->subMonths($i);
+                $monthKey = $date->format('Y-m');
+
+                $monthTransactions = $grouped[$monthKey] ?? collect();
+
+                $income = 0;
+                $expense = 0;
+
+                foreach ($monthTransactions as $transaction) {
+                    $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
+
+                    if ($transaction->type === 'income') {
+                        $income += $amountInBase;
+                    } else {
+                        $expense += $amountInBase;
+                    }
+                }
+
+                $trends[] = [
+                    'month' => $monthKey,
+                    'month_label' => $date->translatedFormat('F Y'),
+                    'income' => round($income, 2),
+                    'expense' => round($expense, 2),
+                    'balance' => round($income - $expense, 2),
+                    'savings_rate' => $income > 0 ? round((($income - $expense) / $income) * 100, 1) : 0
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'trends' => $trends,
+                    'base_currency' => $baseCurrency->code,
+                    'period_months' => $months
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('MonthlyTrends error: ' . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => 'Ошибка: ' . $e->getMessage()], 500);
+        }
+    }
+
     // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ КУРСОВ ВАЛЮТ ====================
 
     private function loadRatesForTransactions(Collection $transactions, Currency $baseCurrency): array
@@ -105,7 +174,7 @@ class AnalyticsController extends Controller
                 'period' => 'nullable|in:month,year',
                 'year' => 'nullable|integer|min:2000|max:2100',
                 'month' => 'nullable|integer|min:1|max:12',
-                'include_anomalies' => 'nullable|boolean'
+                'include_anomalies' => 'nullable|in:true,false,0,1'
             ]);
 
             $period = $validated['period'] ?? 'month';
@@ -210,7 +279,7 @@ class AnalyticsController extends Controller
             usort($categorySpending, fn($a, $b) => $b['total'] <=> $a['total']);
 
             // Финансовое здоровье - считаем С учетом ВСЕХ доходов и ВСЕХ расходов (реальная картина)
-            $financialHealth = $this->calculateFinancialHealth($userId, $endDate, true);
+            $financialHealth = $this->calculateFinancialHealth($userId, null, true);
 
             // Статистика по исключенным аномалиям
             $excludedAnomalies = $this->getExcludedAnomaliesStats($userId, $startDate, $endDate, $includeAnomalies);
@@ -281,7 +350,11 @@ class AnalyticsController extends Controller
     private function calculateFinancialHealth(int $userId, ?Carbon $currentDate = null, bool $includeAnomalies = true): array
     {
         try {
-            $currentDate = $currentDate ?? Carbon::now();
+            // Не позволяем использовать будущие даты
+            if (!$currentDate || $currentDate > Carbon::now()) {
+                $currentDate = Carbon::now();
+            }
+
             $salaryDay = $this->getUserSalaryDay($userId);
             $threeMonthsAgo = $currentDate->copy()->subMonths(3);
 

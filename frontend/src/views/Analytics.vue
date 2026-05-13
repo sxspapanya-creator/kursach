@@ -9,11 +9,14 @@
           <option value="year">Год</option>
         </select>
         <input v-model="selectedDate" type="month" @change="fetchAnalytics">
+        <label class="anomaly-toggle">
+          <input type="checkbox" v-model="includeAnomalies" @change="fetchAnalytics">
+          <span>📌 Включить разовые траты</span>
+        </label>
         <button @click="fetchAnalytics" :disabled="loading" class="refresh-btn">
           {{ loading ? 'Обновление...' : '🔄 Обновить' }}
         </button>
       </div>
-    </div>
     </div>
 
     <!-- Модальное окно для результатов -->
@@ -39,7 +42,6 @@
       </div>
     </div>
 
-    <!-- Основные метрики -->
     <div class="metrics-grid">
       <div class="metric-card health-card" :style="{ borderColor: financialHealth.color }">
         <div class="metric-tooltip">
@@ -54,11 +56,15 @@
           </div>
           <div class="tooltip-text">
             <strong>Как рассчитано?</strong><br>
-            📊 Ликвидность (30%): остаток до зарплаты<br>
-            🛡️ Подушка (30%): сбережения ÷ расходы<br>
-            💳 Долги (20%): платежи ÷ доход<br>
-            💰 Сбережения (20%): остаток после трат<br>
-            <span class="tooltip-score">Итог: {{ financialHealth.score }}/100</span>
+            📊 Ликвидность (30%): {{ financialHealth.components?.liquidity?.score || 0 }}%<br>
+            <span class="tooltip-sub">Остаток до зарплаты: {{ formatMoney(financialHealth.components?.liquidity?.balance) }}</span><br>
+            🛡️ Подушка (30%): {{ financialHealth.components?.emergency_fund?.score || 0 }}%<br>
+            <span class="tooltip-sub">Сбережения: {{ formatMoney(financialHealth.components?.emergency_fund?.savings) }}</span><br>
+            💳 Долги (20%): {{ financialHealth.components?.debt_load?.score || 0 }}%<br>
+            <span class="tooltip-sub">Платежи: {{ formatMoney(financialHealth.components?.debt_load?.monthly_payments) }}</span><br>
+            💰 Сбережения (20%): {{ financialHealth.components?.savings_rate?.score || 0 }}%<br>
+            <span class="tooltip-sub">Сэкономлено: {{ formatMoney(financialHealth.components?.savings_rate?.saved_amount) }}</span><br>
+            <span class="tooltip-score">⭐ Итог: {{ financialHealth.score }}/100</span>
           </div>
         </div>
       </div>
@@ -103,33 +109,145 @@
       </div>
     </div>
 
-    <!-- Рекомендуемые лимиты -->
-    <div class="optimal-distribution-section" v-if="expenseCategoriesDistribution.length > 0">
-      <button @click="showOptimalDistribution = !showOptimalDistribution" class="toggle-distribution">
-        🎯 {{ showOptimalDistribution ? 'Скрыть' : 'Показать' }} рекомендуемые лимиты по категориям
-      </button>
-      <div v-if="showOptimalDistribution" class="distribution-table">
-        <h3>Рекомендуемые лимиты по категориям расходов</h3>
-        <table class="distribution-table">
-          <thead>
-          <tr>
-            <th>Категория</th>
-            <th>Текущая средняя</th>
-            <th>Рекомендуемый лимит</th>
-            <th>Действие</th>
-          </tr>
-          </thead>
-          <tbody>
-          <tr v-for="item in expenseCategoriesDistribution" :key="item.category_id">
-            <td>{{ item.category_name }}</td>
-            <td>{{ formatMoney(item.current_monthly_avg) }}</td>
-            <td class="recommended-limit">{{ formatMoney(item.recommended_limit) }}</td>
-            <td><button @click="applyOptimalLimit(item)" class="apply-limit-btn">Применить</button></td>
-          </tr>
-          </tbody>
-        </table>
+    <!-- Расходы по категориям -->
+    <div class="categories-section">
+      <div class="section-header">
+        <h2>📂 Расходы по категориям</h2>
+        <span class="total-expenses">Всего: {{ formatMoney(processedTotals.expenses) }}</span>
+      </div>
+      <div class="categories-grid">
+        <div v-for="cat in categorySpending" :key="cat.id" class="category-card" :style="{ borderLeftColor: cat.color }">
+          <div class="category-header">
+            <span class="category-name">{{ cat.name }}</span>
+            <span class="category-amount">{{ formatMoney(cat.total) }}</span>
+          </div>
+          <div class="category-progress">
+            <div class="progress-bar" :style="{ width: getCategoryPercent(cat.total) + '%', backgroundColor: cat.color }"></div>
+          </div>
+          <div class="category-footer">
+            <span class="category-percent">{{ getCategoryPercent(cat.total) }}%</span>
+            <span v-if="cat.budget_limit > 0" class="category-limit" :class="getBudgetStatusClass(cat)">
+              Лимит: {{ formatMoney(cat.budget_limit) }}
+              <span class="limit-indicator" :class="cat.budget_status">●</span>
+            </span>
+            <span v-else class="category-limit no-limit">Лимит не установлен</span>
+          </div>
+        </div>
       </div>
     </div>
+
+    <!-- Прогноз (если есть) -->
+    <div v-if="forecastData" class="forecast-section">
+      <div class="section-header">
+        <h2>🔮 Прогноз расходов</h2>
+        <div class="forecast-badge">
+          <span class="model-badge">{{ forecastData.model }}</span>
+          <span class="confidence-badge" :class="forecastData.confidence_level">
+            {{ forecastData.confidence_text }} ({{ forecastData.confidence }}%)
+          </span>
+        </div>
+      </div>
+
+      <div class="forecast-grid">
+        <!-- Остаток текущего месяца -->
+        <div class="forecast-card remaining">
+          <h3>📅 Остаток {{ currentMonthName }}</h3>
+          <div class="forecast-amount">{{ formatMoney(forecastData.remaining_current_month?.forecast_total) }}</div>
+          <div class="forecast-detail">
+            Уже потрачено: {{ formatMoney(forecastData.remaining_current_month?.already_spent) }}
+          </div>
+          <div class="forecast-detail">
+            Средний расход в день: {{ formatMoney(forecastData.remaining_current_month?.weighted_daily_rate) }}
+          </div>
+          <div class="forecast-detail">
+            Осталось дней: {{ forecastData.remaining_current_month?.days_left }}
+          </div>
+          <div class="forecast-full-month">
+            Весь месяц: {{ formatMoney(forecastData.remaining_current_month?.forecast_full_month) }}
+          </div>
+        </div>
+
+        <!-- Следующий месяц -->
+        <div class="forecast-card next">
+          <h3>📆 {{ forecastData.next_month?.month }}</h3>
+          <div class="forecast-amount">{{ formatMoney(forecastData.next_month?.total_forecast) }}</div>
+          <div class="forecast-detail">
+            Средний расход: {{ formatMoney(forecastData.next_month?.daily_average) }}/день
+          </div>
+          <div class="forecast-detail">
+            Изменение: {{ formatChange(forecastData.next_month?.change_from_previous) }}
+          </div>
+          <div class="forecast-trend" :class="forecastData.next_month?.trend">
+            {{ getTrendIcon(forecastData.next_month?.trend) }} {{ getTrendText(forecastData.next_month?.trend) }}
+          </div>
+        </div>
+
+        <!-- Второй месяц -->
+        <div class="forecast-card second">
+          <h3>📆 {{ forecastData.second_month?.month }}</h3>
+          <div class="forecast-amount">{{ formatMoney(forecastData.second_month?.total_forecast) }}</div>
+          <div class="forecast-detail">
+            Средний расход: {{ formatMoney(forecastData.second_month?.daily_average) }}/день
+          </div>
+          <div class="forecast-detail">
+            Изменение: {{ formatChange(forecastData.second_month?.change_from_previous) }}
+          </div>
+          <div class="forecast-trend" :class="forecastData.second_month?.trend">
+            {{ getTrendIcon(forecastData.second_month?.trend) }} {{ getTrendText(forecastData.second_month?.trend) }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Подневный прогноз -->
+      <div v-if="forecastData.remaining_current_month?.daily_breakdown?.length" class="daily-forecast">
+        <h3>📊 Прогноз по дням</h3>
+        <div class="daily-grid">
+          <div v-for="day in forecastData.remaining_current_month.daily_breakdown.slice(0, 14)" :key="day.date" class="daily-card">
+            <div class="daily-date">{{ formatDate(day.date) }}</div>
+            <div class="daily-day">{{ day.day_of_week }}</div>
+            <div class="daily-amount">{{ formatMoney(day.forecast) }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Прогноз по категориям -->
+      <div v-if="forecastData.category_forecasts?.length" class="category-forecast">
+        <h3>📈 Прогноз по категориям на {{ forecastData.next_month?.month || 'следующий месяц' }}</h3>
+        <div class="category-forecast-grid">
+          <div v-for="cat in forecastData.category_forecasts" :key="cat.category_id" class="category-forecast-card">
+            <div class="cat-color" :style="{ backgroundColor: cat.color }"></div>
+            <div class="cat-info">
+              <div class="cat-name">{{ cat.category_name }}</div>
+              <div class="cat-share">{{ cat.share_percent }}% от общего бюджета</div>
+            </div>
+            <div class="cat-forecast">{{ formatMoney(cat.forecast) }}</div>
+            <div class="cat-daily">{{ formatMoney(cat.daily_average) }}/день</div>
+            <!-- Рекомендация по лимиту (если есть) -->
+            <div v-if="cat.recommendation" class="cat-recommendation" :class="cat.recommendation.action">
+              <span v-if="cat.recommendation.action === 'set'">➕ Рекомендуемый лимит: {{ formatMoney(cat.recommendation.recommended_limit) }}</span>
+              <span v-else-if="cat.recommendation.action === 'increase'">📈 Увеличить лимит до {{ formatMoney(cat.recommendation.recommended_limit) }}</span>
+              <span v-else-if="cat.recommendation.action === 'decrease'">📉 Уменьшить лимит до {{ formatMoney(cat.recommendation.recommended_limit) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Информация об аномалиях -->
+      <div v-if="forecastData.excluded_anomalies?.total_count > 0" class="anomalies-info">
+        <div class="anomalies-icon">⚠️</div>
+        <div class="anomalies-text">
+          {{ forecastData.excluded_anomalies.message }}<br>
+          <small>Сумма исключённых транзакций: {{ formatMoney(forecastData.excluded_anomalies.total_amount) }}</small>
+        </div>
+      </div>
+    </div>
+
+    <!-- Информация об аномалиях в обзоре -->
+    <div v-if="analytics.anomalies_info?.count > 0 && !includeAnomalies" class="anomalies-banner">
+      <span>⚠️</span>
+      <span>{{ analytics.anomalies_info.message }}</span>
+    </div>
+  </div>
 </template>
 
 <script>
@@ -139,137 +257,22 @@ import axios from 'axios'
 export default {
   name: 'AnalyticsPage',
   setup() {
-    const analytics = ref({ totals: {}, category_spending: [], date_range: {}, financial_health: {}, forecasts: {} })
+    const analytics = ref({
+      totals: {},
+      category_spending: [],
+      date_range: {},
+      financial_health: {},
+      anomalies_info: {}
+    })
+    const forecastData = ref(null)
     const loading = ref(false)
     const selectedPeriod = ref('month')
     const selectedDate = ref(new Date().toISOString().slice(0, 7))
-    const showOptimalDistribution = ref(false)
+    const includeAnomalies = ref(false)
     const showResultModal = ref(false)
     const resultModal = ref({ icon: '', title: '', data: '' })
 
-    // Функция для получения суммы в BYN из объекта (транзакции или категории)
-    const getAmountInByn = (item) => {
-      if (!item) return 0
-
-      // Если уже есть amount_in_byn
-      if (item.amount_in_byn !== undefined && item.amount_in_byn !== null) {
-        return parseFloat(item.amount_in_byn) || 0
-      }
-
-      // Если есть total_in_byn (для категорий)
-      if (item.total_in_byn !== undefined && item.total_in_byn !== null) {
-        return parseFloat(item.total_in_byn) || 0
-      }
-
-      // Если есть total и exchange_rate
-      if (item.exchange_rate && item.total) {
-        return (parseFloat(item.total) || 0) * parseFloat(item.exchange_rate)
-      }
-
-      // Если есть amount и exchange_rate
-      if (item.exchange_rate && item.amount) {
-        return (parseFloat(item.amount) || 0) * parseFloat(item.exchange_rate)
-      }
-
-      // Если нет курса - считаем что это BYN
-      if (item.total !== undefined && item.total !== null) {
-        return parseFloat(item.total) || 0
-      }
-
-      if (item.amount !== undefined && item.amount !== null) {
-        return parseFloat(item.amount) || 0
-      }
-
-      return 0
-    }
-
-    // Обработанные итоги (пересчитанные в BYN)
-    const processedTotals = computed(() => {
-      const totals = analytics.value.totals || {}
-
-      let income = getAmountInByn(totals)
-      let expenses = 0
-      let balance = 0
-      let savings_rate = 0
-
-      // Если totals это объект с разными полями
-      if (totals.income !== undefined) {
-        income = getAmountInByn({ total: totals.income })
-      }
-      if (totals.expenses !== undefined) {
-        expenses = getAmountInByn({ total: totals.expenses })
-      }
-      if (totals.balance !== undefined) {
-        balance = getAmountInByn({ total: totals.balance })
-      } else {
-        balance = income - expenses
-      }
-      if (totals.savings_rate !== undefined) {
-        savings_rate = totals.savings_rate
-      } else if (income > 0) {
-        savings_rate = (balance / income) * 100
-      }
-
-      return { income, expenses, balance, savings_rate }
-    })
-
-    // Обработанные распределения для лимитов
-    const expenseCategoriesDistribution = computed(() => {
-      const distribution = analytics.value.forecasts?.optimal_distribution || []
-      return distribution
-          .filter(item => item.category_name && !item.category_name.toLowerCase().includes('доход'))
-          .map(item => ({
-            ...item,
-            current_monthly_avg: getAmountInByn({ total: item.current_monthly_avg }),
-            recommended_limit: getAmountInByn({ total: item.recommended_limit })
-          }))
-    })
-
-    const financialHealth = computed(() => analytics.value.financial_health || {
-      score: 0,
-      status: 'poor',
-      status_label: 'Не определено',
-      color: '#95a5a6'
-    })
-
-    const balanceClass = computed(() => {
-      const balance = processedTotals.value.balance
-      if (balance > 0) return 'positive'
-      if (balance < 0) return 'negative'
-      return 'neutral'
-    })
-
-    const fetchAnalytics = async () => {
-      try {
-        loading.value = true
-        const [year, month] = selectedDate.value.split('-')
-        const res = await axios.get('/api/analytics/overview', {
-          params: {
-            period: selectedPeriod.value,
-            month: parseInt(month),
-            year: parseInt(year)
-          },
-          credentials: 'include'
-        })
-
-        if (res.data.status === 'success') {
-          const data = res.data.data || {}
-
-          // Оставляем сырые данные, computed свойства пересчитают их в BYN
-          analytics.value = {
-            totals: data.totals || {},
-            category_spending: data.category_spending || [],
-            date_range: data.date_range || {},
-            financial_health: data.financial_health || {},
-            forecasts: data.forecasts || {}
-          }
-        }
-      } catch (err) {
-        console.error('Analytics fetch error:', err)
-      } finally {
-        loading.value = false
-      }
-    }
+    // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
     const formatMoney = (amount) => {
       const num = Number(amount)
@@ -280,28 +283,159 @@ export default {
       }).format(num) + ' Br'
     }
 
+    const formatDate = (dateStr) => {
+      const [year, month, day] = dateStr.split('-')
+      return `${day}.${month}`
+    }
+
+    const formatChange = (percent) => {
+      if (!percent || percent === 0) return '0%'
+      const sign = percent > 0 ? '+' : ''
+      return `${sign}${percent}%`
+    }
+
+    const getTrendIcon = (trend) => {
+      if (trend === 'growth') return '📈'
+      if (trend === 'decline') return '📉'
+      return '📊'
+    }
+
+    const getTrendText = (trend) => {
+      if (trend === 'growth') return 'Рост'
+      if (trend === 'decline') return 'Снижение'
+      return 'Стабильно'
+    }
+
+    const getBudgetStatusClass = (category) => {
+      if (category.budget_status === 'good') return 'status-good'
+      if (category.budget_status === 'warning') return 'status-warning'
+      if (category.budget_status === 'critical') return 'status-critical'
+      return ''
+    }
+
+    // ==================== ВЫЧИСЛЯЕМЫЕ СВОЙСТВА ====================
+
+    const processedTotals = computed(() => {
+      const totals = analytics.value.totals || {}
+      return {
+        income: totals.income || 0,
+        expenses: totals.expenses || 0,
+        balance: totals.balance || 0,
+        savings_rate: totals.savings_rate || 0
+      }
+    })
+
+    const categorySpending = computed(() => {
+      return analytics.value.category_spending || []
+    })
+
+    const financialHealth = computed(() => {
+      return analytics.value.financial_health || {
+        score: 0,
+        status: 'poor',
+        status_label: 'Не определено',
+        color: '#95a5a6',
+        components: {}
+      }
+    })
+
+    const balanceClass = computed(() => {
+      const balance = processedTotals.value.balance
+      if (balance > 0) return 'positive'
+      if (balance < 0) return 'negative'
+      return 'neutral'
+    })
+
+    const currentMonthName = computed(() => {
+      const now = new Date()
+      return now.toLocaleString('ru', { month: 'long', year: 'numeric' })
+    })
+
+    const totalExpensesSum = computed(() => {
+      return categorySpending.value.reduce((sum, cat) => sum + (cat.total || 0), 0)
+    })
+
+    // ==================== МЕТОДЫ ====================
+
+    const getCategoryPercent = (amount) => {
+      if (totalExpensesSum.value === 0) return 0
+      return Math.round((amount / totalExpensesSum.value) * 100)
+    }
+
+    const fetchAnalytics = async () => {
+      try {
+        loading.value = true
+        const [year, month] = selectedDate.value.split('-')
+
+        // Запрос обзора
+        const overviewRes = await axios.get('/api/analytics/overview', {
+          params: {
+            period: selectedPeriod.value,
+            month: parseInt(month),
+            year: parseInt(year),
+            include_anomalies: includeAnomalies.value
+          },
+          credentials: 'include'
+        })
+
+        if (overviewRes.data.status === 'success') {
+          analytics.value = overviewRes.data.data || {}
+        }
+
+        // Запрос прогноза
+        const forecastRes = await axios.get('/api/forecast', {
+          credentials: 'include'
+        })
+
+        if (forecastRes.data.status === 'success') {
+          forecastData.value = forecastRes.data.data
+        }
+
+      } catch (err) {
+        console.error('Analytics fetch error:', err)
+        if (err.response?.data?.message) {
+          resultModal.value = {
+            icon: '❌',
+            title: 'Ошибка',
+            data: err.response.data.message
+          }
+          showResultModal.value = true
+        }
+      } finally {
+        loading.value = false
+      }
+    }
+
     onMounted(() => {
       fetchAnalytics()
     })
 
-    watch([selectedPeriod, selectedDate], () => {
+    watch([selectedPeriod, selectedDate, includeAnomalies], () => {
       if (!loading.value) fetchAnalytics()
     })
 
     return {
       analytics,
+      forecastData,
       loading,
       selectedPeriod,
       selectedDate,
-      showOptimalDistribution,
+      includeAnomalies,
       showResultModal,
       resultModal,
-      balanceClass,
-      financialHealth,
       processedTotals,
-      expenseCategoriesDistribution,
-      fetchAnalytics,
+      categorySpending,
+      financialHealth,
+      balanceClass,
+      currentMonthName,
       formatMoney,
+      formatDate,
+      formatChange,
+      getTrendIcon,
+      getTrendText,
+      getBudgetStatusClass,
+      getCategoryPercent,
+      fetchAnalytics
     }
   }
 }
