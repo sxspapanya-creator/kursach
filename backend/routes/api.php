@@ -39,6 +39,9 @@ Route::put('/transactions/{id}', [TransactionController::class, 'update']);
 Route::delete('/transactions/{id}', [TransactionController::class, 'destroy']);
 Route::post('/transactions/mass-delete', [TransactionController::class, 'massDelete']);
 Route::post('/transactions/suggest-category', [TransactionController::class, 'suggestCategory']);
+Route::patch('/transactions/{id}/mark-anomaly', [TransactionController::class, 'markAsAnomaly']);
+Route::get('/transactions/anomalies/list', [TransactionController::class, 'getAnomalies']);
+
 
 Route::group(['middleware' => [UserPermissionMiddleware::class]], function () {
     // Аналитика
@@ -46,7 +49,7 @@ Route::group(['middleware' => [UserPermissionMiddleware::class]], function () {
     Route::get('/analytics/financial-health', [AnalyticsController::class, 'financialHealth']);
     Route::get('/analytics/monthly-trends', [AnalyticsController::class, 'monthlyTrends']);
     Route::get('/analytics/forecast/next-month', [AnalyticsController::class, 'forecastNextMonth']);
-    Route::get('/analytics/forecast/30-days', [AnalyticsController::class, 'forecastNext30Days']);
+    Route::get('/forecast', [AnalyticsController::class, 'forecast']);
 });
 
 Route::get('/currencies', [CurrencyController::class, 'index']);

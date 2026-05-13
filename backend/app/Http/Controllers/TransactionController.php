@@ -38,20 +38,25 @@ class TransactionController extends Controller
                 'date_from' => 'nullable|date',
                 'date_to' => 'nullable|date|after_or_equal:date_from',
                 'limit' => 'nullable|integer|min:1|max:10000',
+                'include_anomalies' => 'nullable|boolean', // НОВЫЙ ПАРАМЕТР
             ]);
 
-            // Нельзя валидировать fetch_all правилом boolean: в query приходит строка "true", она не проходит validateBoolean (принимаются только 0/1 и т.д.) → 422.
             $fetchAll = $request->boolean('fetch_all');
+            $includeAnomalies = $request->boolean('include_anomalies', false); // По умолчанию false
 
             $query = Transaction::where('user_id', $userId)->with(['categories', 'currency']);
+
+            // НОВОЕ: Фильтрация по is_anomaly (по умолчанию исключаем аномалии)
+            if (!$includeAnomalies) {
+                $query->where('is_anomaly', false);
+            }
 
             // Фильтрация по типу
             if (isset($validated['type'])) {
                 $query->where('type', $validated['type']);
             }
 
-            // Фильтрация по категориям (многие ко многим): транзакция попадает в выборку,
-            // если у неё есть хотя бы одна из выбранных категорий (OR).
+            // Фильтрация по категориям
             if (!empty($validated['category_ids'])) {
                 $categoryIds = array_values(array_unique($validated['category_ids']));
                 $query->whereHas('categories', function ($q) use ($categoryIds) {
@@ -123,6 +128,7 @@ class TransactionController extends Controller
                     'total' => $transactions->count(),
                     'limit' => $fetchAll ? null : $limit,
                     'fetch_all' => $fetchAll,
+                    'include_anomalies' => $includeAnomalies, // НОВОЕ
                 ]
             ]);
         } catch (ValidationException $e) {
@@ -142,6 +148,100 @@ class TransactionController extends Controller
         }
     }
 
+    // НОВЫЙ МЕТОД: Отметить транзакцию как аномальную/разовую
+    public function markAsAnomaly($id, Request $request)
+    {
+        try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $validated = $request->validate([
+                'is_anomaly' => 'required|boolean',
+                'reason' => 'nullable|string|max:500'
+            ]);
+
+            $transaction = Transaction::where('user_id', $userId)->findOrFail($id);
+
+            // Обновляем статус аномалии
+            $transaction->is_anomaly = $validated['is_anomaly'];
+
+            // Опционально: добавляем причину в описание
+            if ($validated['is_anomaly'] && !empty($validated['reason'])) {
+                $transaction->description = $transaction->description . " [Аномалия: {$validated['reason']}]";
+            }
+
+            $transaction->save();
+
+            $statusText = $validated['is_anomaly'] ? 'отмечена как аномальная/разовая' : 'отмечена как обычная';
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Транзакция {$statusText}",
+                'data' => $transaction->load(['categories', 'currency'])
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to mark transaction: ' . $e->getMessage()
+            ], 404);
+        }
+    }
+
+    // НОВЫЙ МЕТОД: Получить список аномальных транзакций
+    public function getAnomalies(Request $request)
+    {
+        try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $validated = $request->validate([
+                'start_date' => 'nullable|date',
+                'end_date' => 'nullable|date',
+            ]);
+
+            $query = Transaction::where('user_id', $userId)
+                ->where('is_anomaly', true)
+                ->with(['categories', 'currency']);
+
+            if (isset($validated['start_date'])) {
+                $query->where('date', '>=', $validated['start_date']);
+            }
+
+            if (isset($validated['end_date'])) {
+                $query->where('date', '<=', $validated['end_date']);
+            }
+
+            $anomalies = $query->orderBy('date', 'desc')->get();
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $anomalies,
+                'meta' => [
+                    'total' => $anomalies->count(),
+                    'total_amount' => $anomalies->sum('amount')
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to fetch anomalies: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // Обновляем метод store - добавляем is_anomaly
     public function store(Request $request)
     {
         try {
@@ -162,6 +262,7 @@ class TransactionController extends Controller
                 'date' => 'required|date',
                 'payment_method' => 'required|in:cash,card,transfer',
                 'currency_id' => 'required|exists:currencies,id',
+                'is_anomaly' => 'nullable|boolean', // НОВОЕ ПОЛЕ (опционально)
             ]);
 
             // Проверяем, что все категории принадлежат пользователю
@@ -185,13 +286,11 @@ class TransactionController extends Controller
 
             // Для BYN пропускаем проверку курса
             if ($currency->code !== 'BYN') {
-                // Пытаемся найти курс на указанную дату
                 $rate = CurrencyRate::where('from_currency_id', $validated['currency_id'])
                     ->where('to_currency_id', $byn->id)
                     ->where('date', $validated['date'])
                     ->first();
 
-                // Если нет курса на точную дату, берем ближайший предыдущий
                 if (!$rate) {
                     $rate = CurrencyRate::where('from_currency_id', $validated['currency_id'])
                         ->where('to_currency_id', $byn->id)
@@ -200,7 +299,6 @@ class TransactionController extends Controller
                         ->first();
                 }
 
-                // Если всё равно нет курса - возвращаем ошибку
                 if (!$rate) {
                     return response()->json([
                         'status' => 'error',
@@ -212,7 +310,7 @@ class TransactionController extends Controller
                 }
             }
 
-            // Создаем транзакцию
+            // Создаем транзакцию (добавляем is_anomaly)
             $transaction = Transaction::create([
                 'amount' => $validated['amount'],
                 'type' => $validated['type'],
@@ -220,7 +318,8 @@ class TransactionController extends Controller
                 'date' => $validated['date'],
                 'payment_method' => $validated['payment_method'],
                 'user_id' => $userId,
-                'currency_id' => $validated['currency_id']
+                'currency_id' => $validated['currency_id'],
+                'is_anomaly' => $validated['is_anomaly'] ?? false, // НОВОЕ
             ]);
 
             // Привязываем категории
@@ -246,8 +345,83 @@ class TransactionController extends Controller
         }
     }
 
+    // Обновляем метод update - добавляем возможность обновлять is_anomaly
+    public function update(Request $request, $id)
+    {
+        try {
+            $userId = Auth::id();
+            if (!$userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            $transaction = Transaction::where('user_id', $userId)->findOrFail($id);
+
+            $validated = $request->validate([
+                'amount' => 'sometimes|required|numeric|min:0.01',
+                'type' => 'sometimes|required|in:income,expense',
+                'category_ids' => 'sometimes|required|array|min:1',
+                'category_ids.*' => 'integer|exists:categories,id',
+                'description' => 'nullable|string|max:500',
+                'date' => 'sometimes|required|date',
+                'payment_method' => 'sometimes|required|in:cash,card,transfer',
+                'currency_id' => 'sometimes|required|exists:currencies,id',
+                'is_anomaly' => 'nullable|boolean', // НОВОЕ
+            ]);
+
+            // Если обновляются категории
+            if (isset($validated['category_ids'])) {
+                $categoryIds = $validated['category_ids'];
+                $validCategoryIds = Category::where('user_id', $userId)
+                    ->whereIn('id', $categoryIds)
+                    ->pluck('id')
+                    ->toArray();
+
+                if (count($validCategoryIds) !== count($categoryIds)) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Validation failed',
+                        'errors' => ['category_ids' => ['Одна или несколько категорий не найдены или не принадлежат вам.']]
+                    ], 422);
+                }
+
+                $transaction->categories()->sync($validCategoryIds);
+            }
+
+            // Обновляем остальные поля (включая is_anomaly)
+            $updateData = collect($validated)->except(['category_ids'])->toArray();
+            if (!empty($updateData)) {
+                $transaction->update($updateData);
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Transaction updated successfully',
+                'data' => $transaction->load(['categories', 'currency'])
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Transaction not found'
+            ], 404);
+        }
+    }
+
+    // Остальные методы (show, destroy, summary, recent, massDelete, suggestCategory)
+    // НЕ ТРЕБУЮТ изменений, так как они работают с конкретными транзакциями
+    // или не связаны с фильтрацией по аномалиям
+
     public function show($id)
     {
+        // Без изменений
         try {
             $userId = Auth::id();
             if (!$userId) {
@@ -273,77 +447,9 @@ class TransactionController extends Controller
         }
     }
 
-    public function update(Request $request, $id)
-    {
-        try {
-            $userId = Auth::id();
-            if (!$userId) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Unauthorized'
-                ], 401);
-            }
-
-            $transaction = Transaction::where('user_id', $userId)->findOrFail($id);
-
-            $validated = $request->validate([
-                'amount' => 'sometimes|required|numeric|min:0.01',
-                'type' => 'sometimes|required|in:income,expense',
-                'category_ids' => 'sometimes|required|array|min:1',
-                'category_ids.*' => 'integer|exists:categories,id',
-                'description' => 'nullable|string|max:500',
-                'date' => 'sometimes|required|date',
-                'payment_method' => 'sometimes|required|in:cash,card,transfer',
-                'currency_id' => 'sometimes|required|exists:currencies,id'
-            ]);
-
-            // Если обновляются категории
-            if (isset($validated['category_ids'])) {
-                $categoryIds = $validated['category_ids'];
-                $validCategoryIds = Category::where('user_id', $userId)
-                    ->whereIn('id', $categoryIds)
-                    ->pluck('id')
-                    ->toArray();
-
-                if (count($validCategoryIds) !== count($categoryIds)) {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Validation failed',
-                        'errors' => ['category_ids' => ['Одна или несколько категорий не найдены или не принадлежат вам.']]
-                    ], 422);
-                }
-
-                // Синхронизируем категории
-                $transaction->categories()->sync($validCategoryIds);
-            }
-
-            // Обновляем остальные поля (исключая category_ids)
-            $updateData = collect($validated)->except(['category_ids'])->toArray();
-            if (!empty($updateData)) {
-                $transaction->update($updateData);
-            }
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Transaction updated successfully',
-                'data' => $transaction->load(['categories', 'currency'])
-            ]);
-        } catch (ValidationException $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Transaction not found'
-            ], 404);
-        }
-    }
-
     public function destroy($id)
     {
+        // Без изменений
         try {
             $userId = Auth::id();
             if (!$userId) {
@@ -371,6 +477,7 @@ class TransactionController extends Controller
 
     public function summary(Request $request)
     {
+        // Можно добавить опциональную фильтрацию по is_anomaly
         try {
             $userId = Auth::id();
             if (!$userId) {
@@ -382,24 +489,31 @@ class TransactionController extends Controller
 
             $validated = $request->validate([
                 'month' => 'nullable|integer|min:1|max:12',
-                'year' => 'nullable|integer|min:2000|max:2100'
+                'year' => 'nullable|integer|min:2000|max:2100',
+                'exclude_anomalies' => 'nullable|boolean', // НОВОЕ
             ]);
 
             $month = $validated['month'] ?? date('m');
             $year = $validated['year'] ?? date('Y');
+            $excludeAnomalies = $request->boolean('exclude_anomalies', true); // По умолчанию true
 
-            $income = Transaction::where('user_id', $userId)
+            $incomeQuery = Transaction::where('user_id', $userId)
                 ->where('type', 'income')
                 ->whereMonth('date', $month)
-                ->whereYear('date', $year)
-                ->sum('amount');
+                ->whereYear('date', $year);
 
-            $expenses = Transaction::where('user_id', $userId)
+            $expenseQuery = Transaction::where('user_id', $userId)
                 ->where('type', 'expense')
                 ->whereMonth('date', $month)
-                ->whereYear('date', $year)
-                ->sum('amount');
+                ->whereYear('date', $year);
 
+            if ($excludeAnomalies) {
+                $incomeQuery->where('is_anomaly', false);
+                $expenseQuery->where('is_anomaly', false);
+            }
+
+            $income = $incomeQuery->sum('amount');
+            $expenses = $expenseQuery->sum('amount');
             $balance = $income - $expenses;
 
             return response()->json([
@@ -411,7 +525,8 @@ class TransactionController extends Controller
                     'period' => [
                         'month' => $month,
                         'year' => $year
-                    ]
+                    ],
+                    'excluded_anomalies' => $excludeAnomalies
                 ]
             ]);
         } catch (\Exception $e) {
@@ -424,6 +539,7 @@ class TransactionController extends Controller
 
     public function recent(Request $request)
     {
+        // Добавляем опциональную фильтрацию
         try {
             $userId = Auth::id();
             if (!$userId) {
@@ -434,21 +550,31 @@ class TransactionController extends Controller
             }
 
             $validated = $request->validate([
-                'limit' => 'nullable|integer|min:1|max:1000'
+                'limit' => 'nullable|integer|min:1|max:1000',
+                'include_anomalies' => 'nullable|boolean', // НОВОЕ
             ]);
 
             $limit = $validated['limit'] ?? 10;
+            $includeAnomalies = $request->boolean('include_anomalies', false);
 
-            $transactions = Transaction::where('user_id', $userId)
-                ->with(['categories', 'currency'])
-                ->orderBy('date', 'desc')
+            $query = Transaction::where('user_id', $userId)
+                ->with(['categories', 'currency']);
+
+            if (!$includeAnomalies) {
+                $query->where('is_anomaly', false);
+            }
+
+            $transactions = $query->orderBy('date', 'desc')
                 ->orderBy('created_at', 'desc')
                 ->take($limit)
                 ->get();
 
             return response()->json([
                 'status' => 'success',
-                'data' => $transactions
+                'data' => $transactions,
+                'meta' => [
+                    'include_anomalies' => $includeAnomalies
+                ]
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -460,6 +586,7 @@ class TransactionController extends Controller
 
     public function massDelete(Request $request)
     {
+        // Без изменений
         try {
             $userId = Auth::id();
             if (!$userId) {
@@ -476,7 +603,6 @@ class TransactionController extends Controller
 
             $transactionIds = $validated['transaction_ids'];
 
-            // Проверяем, что все транзакции принадлежат пользователю
             $count = Transaction::where('user_id', $userId)
                 ->whereIn('id', $transactionIds)
                 ->count();
@@ -488,7 +614,6 @@ class TransactionController extends Controller
                 ], 403);
             }
 
-            // Удаляем связи с категориями
             foreach ($transactionIds as $id) {
                 $transaction = Transaction::find($id);
                 if ($transaction) {
@@ -496,7 +621,6 @@ class TransactionController extends Controller
                 }
             }
 
-            // Удаляем транзакции
             $deleted = Transaction::where('user_id', $userId)
                 ->whereIn('id', $transactionIds)
                 ->delete();
@@ -521,11 +645,9 @@ class TransactionController extends Controller
         }
     }
 
-    /**
-     * Предложить категорию для транзакции на основе описания
-     */
     public function suggestCategory(Request $request)
     {
+        // Без изменений
         try {
             $userId = Auth::id();
             if (!$userId) {

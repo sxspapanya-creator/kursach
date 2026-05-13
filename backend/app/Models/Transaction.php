@@ -15,12 +15,14 @@ class Transaction extends Model
         'date',
         'payment_method',
         'user_id',
-        'currency_id',  // добавил валюту
+        'currency_id',
+        'is_anomaly',
     ];
 
     protected $casts = [
         'amount' => 'decimal:6',
         'date' => 'date',
+        'is_anomaly' => 'boolean',
     ];
 
     // Связь с пользователем
@@ -39,5 +41,15 @@ class Transaction extends Model
     public function categories(): BelongsToMany
     {
         return $this->belongsToMany(Category::class, 'category_transaction');
+    }
+
+    public function scopeRegular($query)
+    {
+        return $query->where('is_anomaly', false);
+    }
+
+    public function scopeAnomaly($query)
+    {
+        return $query->where('is_anomaly', true);
     }
 }

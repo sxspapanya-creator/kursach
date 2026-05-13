@@ -26,7 +26,8 @@ class DatabaseSeeder extends Seeder
             EightMonthsDataSeeder::class,
             ThreeMonthsDataSeeder::class,
             TwentyMonthsDataSeeder::class,
-            AnalyticsTestDataSeeder::class,
+            TwelveMonthsDataSeeder::class,
+            ThirtyMonthsDataSeeder::class,
             PlansSeeder::class
         ]);
     }

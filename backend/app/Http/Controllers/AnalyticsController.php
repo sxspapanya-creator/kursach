@@ -22,78 +22,8 @@ class AnalyticsController extends Controller
         return $userId;
     }
 
-    public function monthlyTrends(Request $request): \Illuminate\Http\JsonResponse
-    {
-        try {
-            $userId = $this->getUserId();
-            $months = (int) $request->input('months', 12);
-
-            $baseCurrency = Currency::where('code', 'BYN')->first();
-            if (!$baseCurrency) {
-                return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
-            }
-
-            $startDate = Carbon::now()->subMonths($months - 1)->startOfMonth();
-
-            $transactions = Transaction::where('user_id', $userId)
-                ->with(['currency'])
-                ->where('date', '>=', $startDate)
-                ->get();
-
-            $grouped = $transactions->groupBy(fn($t) => $t->date->format('Y-m'));
-
-            $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
-
-            $trends = [];
-            $currentDate = Carbon::now();
-
-            for ($i = $months - 1; $i >= 0; $i--) {
-                $date = $currentDate->copy()->subMonths($i);
-                $monthKey = $date->format('Y-m');
-
-                $monthTransactions = $grouped[$monthKey] ?? collect();
-
-                $income = 0;
-                $expense = 0;
-
-                foreach ($monthTransactions as $transaction) {
-                    $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
-
-                    if ($transaction->type === 'income') {
-                        $income += $amountInBase;
-                    } else {
-                        $expense += $amountInBase;
-                    }
-                }
-
-                $trends[] = [
-                    'month' => $monthKey,
-                    'month_label' => $date->translatedFormat('F Y'),
-                    'income' => round($income, 2),
-                    'expense' => round($expense, 2),
-                    'balance' => round($income - $expense, 2),
-                    'savings_rate' => $income > 0 ? round((($income - $expense) / $income) * 100, 1) : 0
-                ];
-            }
-
-            return response()->json([
-                'status' => 'success',
-                'data' => [
-                    'trends' => $trends,
-                    'base_currency' => $baseCurrency->code,
-                    'period_months' => $months
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('MonthlyTrends error: ' . $e->getMessage());
-            return response()->json(['status' => 'error', 'message' => 'Ошибка: ' . $e->getMessage()], 500);
-        }
-    }
-
     // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ КУРСОВ ВАЛЮТ ====================
 
-    // Загружает все курсы валют за период одним запросом (оптимизация N+1)
     private function loadRatesForTransactions(Collection $transactions, Currency $baseCurrency): array
     {
         if ($transactions->isEmpty()) return [];
@@ -120,7 +50,6 @@ class AnalyticsController extends Controller
         return $rates;
     }
 
-    // Получает курс из кэша или null
     private function getRateFromCache(array $rates, int $currencyId, Carbon $date, Currency $baseCurrency): ?float
     {
         if ($currencyId == $baseCurrency->id) return 1;
@@ -138,7 +67,6 @@ class AnalyticsController extends Controller
         return $lastDate ? $rates[$currencyId][$lastDate] : null;
     }
 
-    // Получает курс из БД (fallback)
     private function getRateFromDatabase(int $currencyId, int $baseCurrencyId, Carbon $date): ?float
     {
         $rate = CurrencyRate::where('from_currency_id', $currencyId)
@@ -149,7 +77,6 @@ class AnalyticsController extends Controller
         return $rate ? $rate->rate : null;
     }
 
-    // Конвертирует сумму транзакции в BYN по курсу на дату транзакции
     private function convertToBaseCurrency(Transaction $transaction, Currency $baseCurrency, array $ratesCache = []): float
     {
         if ($transaction->currency_id == $baseCurrency->id) return (float) $transaction->amount;
@@ -170,7 +97,6 @@ class AnalyticsController extends Controller
 
     // ==================== ОСНОВНОЙ МЕТОД OVERVIEW ====================
 
-    // Возвращает сводную аналитику за период
     public function overview(Request $request)
     {
         try {
@@ -294,7 +220,6 @@ class AnalyticsController extends Controller
 
     // ==================== ФИНАНСОВОЕ ЗДОРОВЬЕ ====================
 
-    // Рассчитывает интегральный показатель финансового здоровья (0-100)
     private function calculateFinancialHealth(int $userId, ?Carbon $currentDate = null): array
     {
         try {
@@ -383,10 +308,18 @@ class AnalyticsController extends Controller
         $lastSalaryDate = Carbon::create($currentDate->year, $currentDate->month, $salaryDay);
         if ($lastSalaryDate > $currentDate) $lastSalaryDate->subMonth();
 
-        $income = Transaction::where('user_id', $userId)->where('type', 'income')
-            ->where('date', '>=', $lastSalaryDate)->where('date', '<=', $currentDate)->sum('amount');
-        $expense = Transaction::where('user_id', $userId)->where('type', 'expense')
-            ->where('date', '>=', $lastSalaryDate)->where('date', '<=', $currentDate)->sum('amount');
+        $income = Transaction::where('user_id', $userId)
+            ->where('type', 'income')
+            ->where('date', '>=', $lastSalaryDate)
+            ->where('date', '<=', $currentDate)
+            ->sum('amount');
+
+        $expense = Transaction::where('user_id', $userId)
+            ->where('type', 'expense')
+            ->where('date', '>=', $lastSalaryDate)
+            ->where('date', '<=', $currentDate)
+            ->sum('amount');
+
         return $income - $expense;
     }
 
@@ -429,8 +362,14 @@ class AnalyticsController extends Controller
 
     private function getUserSavings(int $userId): float
     {
-        $totalIncome = Transaction::where('user_id', $userId)->where('type', 'income')->sum('amount');
-        $totalExpense = Transaction::where('user_id', $userId)->where('type', 'expense')->sum('amount');
+        $totalIncome = Transaction::where('user_id', $userId)
+            ->where('type', 'income')
+            ->sum('amount');
+
+        $totalExpense = Transaction::where('user_id', $userId)
+            ->where('type', 'expense')
+            ->sum('amount');
+
         return max(0, $totalIncome - $totalExpense);
     }
 
@@ -439,19 +378,26 @@ class AnalyticsController extends Controller
         $loanCategory = Category::where('user_id', $userId)->where('name', 'Кредиты')->where('type', 'expense')->first();
         if ($loanCategory) {
             $threeMonthsAgo = Carbon::now()->subMonths(3);
-            $total = Transaction::where('user_id', $userId)->whereHas('categories', fn($q) => $q->where('categories.id', $loanCategory->id))
-                ->whereBetween('date', [$threeMonthsAgo, Carbon::now()])->sum('amount');
+            $total = Transaction::where('user_id', $userId)
+                ->whereHas('categories', fn($q) => $q->where('categories.id', $loanCategory->id))
+                ->whereBetween('date', [$threeMonthsAgo, Carbon::now()])
+                ->sum('amount');
             return $total / 3;
         }
         return 0;
     }
 
-    // ==================== МЕТОДЫ ДЛЯ ПОЛУЧЕНИЯ ДАННЫХ ====================
+    // ==================== МЕТОДЫ ДЛЯ ПРОГНОЗИРОВАНИЯ ====================
 
     private function getMonthlyExpenseAmount(int $userId, int $year, int $month): float
     {
-        $transactions = Transaction::where('user_id', $userId)->where('type', 'expense')
-            ->with(['currency'])->whereYear('date', $year)->whereMonth('date', $month)->get();
+        $transactions = Transaction::where('user_id', $userId)
+            ->where('type', 'expense')
+            ->with(['currency'])
+            ->whereYear('date', $year)
+            ->whereMonth('date', $month)
+            ->get();
+
         $baseCurrency = Currency::where('code', 'BYN')->first();
         if (!$baseCurrency) return 0;
         $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
@@ -464,9 +410,14 @@ class AnalyticsController extends Controller
 
     private function getCategoryMonthlyExpense(int $userId, int $categoryId, int $year, int $month): float
     {
-        $transactions = Transaction::where('user_id', $userId)->where('type', 'expense')
+        $transactions = Transaction::where('user_id', $userId)
+            ->where('type', 'expense')
             ->whereHas('categories', fn($q) => $q->where('categories.id', $categoryId))
-            ->with(['currency'])->whereYear('date', $year)->whereMonth('date', $month)->get();
+            ->with(['currency'])
+            ->whereYear('date', $year)
+            ->whereMonth('date', $month)
+            ->get();
+
         $baseCurrency = Currency::where('code', 'BYN')->first();
         if (!$baseCurrency) return 0;
         $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
@@ -477,69 +428,140 @@ class AnalyticsController extends Controller
         return $total;
     }
 
-    private function getMonthlyExpensesArray(int $userId, int $months = 24): array
+    private function getMonthlyExpenseAmountForCompleteMonth(int $userId, int $year, int $month): float
+    {
+        $date = Carbon::create($year, $month, 1);
+        $lastDayOfMonth = $date->copy()->endOfMonth();
+
+        if ($lastDayOfMonth > Carbon::now()) {
+            return 0;
+        }
+
+        return $this->getMonthlyExpenseAmount($userId, $year, $month);
+    }
+
+    private function getCompleteMonthsExpensesArray(int $userId, int $months = 24): array
     {
         $result = [];
+        $now = Carbon::now();
+
         for ($i = $months - 1; $i >= 0; $i--) {
-            $date = Carbon::now()->subMonths($i);
-            $amount = $this->getMonthlyExpenseAmount($userId, $date->year, $date->month);
-            $result[] = $amount > 0 ? $amount : 0;
+            $date = $now->copy()->subMonths($i);
+            $amount = $this->getMonthlyExpenseAmountForCompleteMonth($userId, $date->year, $date->month);
+            if ($amount > 0) {
+                $result[] = $amount;
+            }
         }
+
         return $result;
     }
 
-    // ==================== ПРОСТАЯ ЭКСТРАПОЛЯЦИЯ (для 3-6 месяцев) ====================
+    // ==================== ПРОГНОЗ НА ОСТАТОК ТЕКУЩЕГО МЕСЯЦА ====================
 
-    /**
-     * ПРОСТАЯ ЭКСТРАПОЛЯЦИЯ (упрощенная линейная регрессия)
-     *
-     * Использует только первую и последнюю точку для расчета тренда.
-     * Рекомендуется для 3-6 месяцев данных.
-     *
-     * @param array $data Исторические данные
-     * @param int $steps Количество шагов прогноза
-     * @return array Прогнозные значения
-     */
+    private function forecastRemainingCurrentMonth(int $userId): array
+    {
+        $now = Carbon::now();
+        $currentMonth = $now->month;
+        $currentYear = $now->year;
+        $daysPassed = $now->day - 1;
+        $daysTotal = $now->daysInMonth;
+
+        if ($daysPassed <= 0) {
+            $daysPassed = 1;
+        }
+
+        $actualSpent = $this->getMonthlyExpenseAmount($userId, $currentYear, $currentMonth);
+        $currentDailyRate = $actualSpent / $daysPassed;
+
+        $lastMonth = $now->copy()->subMonth();
+        $lastMonthTotal = $this->getMonthlyExpenseAmount($userId, $lastMonth->year, $lastMonth->month);
+        $lastMonthDailyRate = $lastMonthTotal / $lastMonth->daysInMonth;
+
+        $currentWeight = min(0.8, $daysPassed / $daysTotal);
+        $lastWeight = 1 - $currentWeight;
+        $weightedDailyRate = ($currentDailyRate * $currentWeight) + ($lastMonthDailyRate * $lastWeight);
+
+        $daysLeft = $daysTotal - $daysPassed;
+        $forecastRemaining = $weightedDailyRate * $daysLeft;
+
+        $dayFactors = $this->calculateDayOfWeekFactors($userId);
+
+        $dailyBreakdown = [];
+        $currentDate = $now->copy();
+
+        for ($i = 0; $i < $daysLeft; $i++) {
+            $dayOfWeek = $currentDate->dayOfWeek;
+            $dayFactor = $dayFactors[$dayOfWeek] ?? 1.0;
+            $dayForecast = $weightedDailyRate * $dayFactor;
+
+            $dailyBreakdown[] = [
+                'date' => $currentDate->format('Y-m-d'),
+                'day_of_week' => $this->getRussianDayOfWeek($dayOfWeek),
+                'forecast' => round($dayForecast, 2)
+            ];
+
+            $currentDate->addDay();
+        }
+
+        return [
+            'days_left' => $daysLeft,
+            'already_spent' => round($actualSpent, 2),
+            'daily_rate_current' => round($currentDailyRate, 2),
+            'daily_rate_last_month' => round($lastMonthDailyRate, 2),
+            'weighted_daily_rate' => round($weightedDailyRate, 2),
+            'current_month_weight' => round($currentWeight * 100),
+            'last_month_weight' => round($lastWeight * 100),
+            'forecast_total' => round($forecastRemaining, 2),
+            'forecast_full_month' => round($actualSpent + $forecastRemaining, 2),
+            'daily_breakdown' => $dailyBreakdown
+        ];
+    }
+
+    private function forecastFullMonthSummary(float $monthlyForecast, Carbon $targetMonth, float $previousMonthActual): array
+    {
+        $changePercent = $previousMonthActual > 0
+            ? round(($monthlyForecast - $previousMonthActual) / $previousMonthActual * 100, 1)
+            : 0;
+
+        $trend = $changePercent > 5 ? 'growth' : ($changePercent < -5 ? 'decline' : 'stable');
+
+        return [
+            'month' => $targetMonth->translatedFormat('F Y'),
+            'total_forecast' => round($monthlyForecast, 2),
+            'daily_average' => round($monthlyForecast / $targetMonth->daysInMonth, 2),
+            'change_from_previous' => $changePercent,
+            'trend' => $trend,
+            'days_in_month' => $targetMonth->daysInMonth
+        ];
+    }
+
+    // ==================== МЕТОДЫ ПРОГНОЗИРОВАНИЯ ====================
+
     private function simpleExtrapolation(array $data, int $steps): array
     {
         $n = count($data);
         if ($n < 2) {
-            // Недостаточно данных — повторяем последнее значение
             $lastValue = $data[$n - 1] ?? 0;
             return array_fill(0, $steps, $lastValue);
         }
 
         $lastValue = $data[$n - 1];
         $firstValue = $data[0];
-
-        // Среднее изменение в месяц
         $avgChange = ($lastValue - $firstValue) / ($n - 1);
 
-        // Ограничиваем изменение, чтобы прогноз не уходил в ноль слишком быстро
-        $maxDecline = $lastValue * 0.15; // максимум -15% в месяц
-        $maxGrowth = $lastValue * 0.20;   // максимум +20% в месяц
+        $maxDecline = $lastValue * 0.15;
+        $maxGrowth = $lastValue * 0.20;
         $avgChange = max(-$maxDecline, min($maxGrowth, $avgChange));
 
         $forecast = [];
         for ($i = 1; $i <= $steps; $i++) {
             $value = $lastValue + $avgChange * $i;
-            // Прогноз не может быть ниже 30% от последнего значения
             $value = max($lastValue * 0.3, $value);
             $forecast[] = round($value, 2);
         }
-
         return $forecast;
     }
 
-    // ==================== ПОЛНАЯ ЛИНЕЙНАЯ РЕГРЕССИЯ (для 7-14 месяцев) ====================
-
-    /**
-     * ПОЛНАЯ ЛИНЕЙНАЯ РЕГРЕССИЯ (Метод наименьших квадратов)
-     *
-     * @param array $data Исторические данные
-     * @param int $steps Количество шагов прогноза
-     * @return array Прогнозные значения
-     */
     private function linearRegression(array $data, int $steps): array
     {
         $n = count($data);
@@ -564,19 +586,15 @@ class AnalyticsController extends Controller
         $intercept = ($sumY - $slope * $sumX) / $n;
 
         $forecast = [];
+        $lastValue = $data[$n - 1];
         for ($k = 1; $k <= $steps; $k++) {
             $nextX = $n - 1 + $k;
             $value = $slope * $nextX + $intercept;
-            // Ограничиваем прогноз
-            $lastValue = $data[$n - 1];
             $value = max($lastValue * 0.3, min($lastValue * 2.0, $value));
             $forecast[] = round(max(0, $value), 2);
         }
-
         return $forecast;
     }
-
-    // ==================== УЛУЧШЕННОЕ ДВОЙНОЕ ЭКСПОНЕНЦИАЛЬНОЕ СГЛАЖИВАНИЕ (для 15-23 месяцев) ====================
 
     private function doubleExponentialSmoothingImproved(array $data, int $forecastSteps = 6): array
     {
@@ -602,9 +620,36 @@ class AnalyticsController extends Controller
         $lastValue = $data[$n - 1];
         $forecast = $this->constrainForecast($forecast, $lastValue);
         $forecast = $this->smoothForecast($forecast);
-
         return $forecast;
     }
+
+    private function holtWinters(array $data, int $seasonalPeriod = 12, int $forecastSteps = 6): array
+    {
+        $n = count($data);
+        if ($n < $seasonalPeriod * 2) {
+            return $this->doubleExponentialSmoothingImproved($data, $forecastSteps);
+        }
+
+        list($alpha, $beta, $gamma) = $this->optimizeHoltWintersParameters($data);
+        list($level, $trend, $seasonality) = $this->initHoltWintersWithParams($data, $seasonalPeriod, $alpha, $beta, $gamma);
+
+        for ($t = 0; $t < $n; $t++) {
+            $oldLevel = $level;
+            $level = $alpha * $data[$t] + (1 - $alpha) * ($level + $trend);
+            $trend = $beta * ($level - $oldLevel) + (1 - $beta) * $trend;
+            $seasonIndex = $t % $seasonalPeriod;
+            $seasonality[$seasonIndex] = $gamma * ($data[$t] / $level) + (1 - $gamma) * $seasonality[$seasonIndex];
+        }
+
+        $forecast = [];
+        for ($k = 1; $k <= $forecastSteps; $k++) {
+            $seasonIndex = ($n + $k - 1) % $seasonalPeriod;
+            $forecast[] = ($level + $k * $trend) * $seasonality[$seasonIndex];
+        }
+        return $forecast;
+    }
+
+    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ ПРОГНОЗИРОВАНИЯ ====================
 
     private function optimizeHoltParametersAdvanced(array $data): array
     {
@@ -635,7 +680,6 @@ class AnalyticsController extends Controller
                 }
             }
         }
-
         return [$bestAlpha, $bestBeta];
     }
 
@@ -678,7 +722,6 @@ class AnalyticsController extends Controller
     private function initHoltWintersWithLinearRegression(array $data): array
     {
         $n = count($data);
-
         $x = range(0, $n - 1);
         $sumX = array_sum($x);
         $sumY = array_sum($data);
@@ -694,40 +737,8 @@ class AnalyticsController extends Controller
 
         $level = $data[$n - 1] - $trend * ($n - 1);
         $level = max($data[$n - 1] * 0.5, min($data[$n - 1] * 1.5, $level));
-
         return [$level, $trend];
     }
-
-    private function constrainForecast(array $forecast, float $lastValue): array
-    {
-        $minValue = $lastValue * 0.3;
-        $maxValue = $lastValue * 2.0;
-
-        return array_map(fn($v) => max($minValue, min($maxValue, $v)), $forecast);
-    }
-
-    private function smoothForecast(array $forecast): array
-    {
-        $smoothed = [];
-        $window = 3;
-
-        for ($i = 0; $i < count($forecast); $i++) {
-            $sum = 0;
-            $count = 0;
-            for ($j = -$window; $j <= $window; $j++) {
-                $idx = $i + $j;
-                if ($idx >= 0 && $idx < count($forecast)) {
-                    $sum += $forecast[$idx];
-                    $count++;
-                }
-            }
-            $smoothed[] = $sum / $count;
-        }
-
-        return $smoothed;
-    }
-
-    // ==================== КЛАССИЧЕСКИЙ МЕТОД ХОЛЬТА-ВИНТЕРСА (для 24+ месяцев) ====================
 
     private function optimizeHoltWintersParameters(array $data): array
     {
@@ -739,9 +750,7 @@ class AnalyticsController extends Controller
         for ($alpha = 0.1; $alpha <= 0.9; $alpha += 0.1) {
             for ($beta = 0.05; $beta <= 0.5; $beta += 0.05) {
                 for ($gamma = 0.1; $gamma <= 0.9; $gamma += 0.1) {
-
                     $mape = $this->calculateMAPE($data, $alpha, $beta, $gamma);
-
                     if ($mape < $bestMAPE) {
                         $bestMAPE = $mape;
                         $bestAlpha = $alpha;
@@ -751,7 +760,6 @@ class AnalyticsController extends Controller
                 }
             }
         }
-
         return [$bestAlpha, $bestBeta, $bestGamma];
     }
 
@@ -782,7 +790,6 @@ class AnalyticsController extends Controller
 
             $seasonality[$seasonIndex] = $gamma * ($data[$t] / $level) + (1 - $gamma) * $seasonality[$seasonIndex];
         }
-
         return $validCount > 0 ? (array_sum($errors) / $validCount) * 100 : INF;
     }
 
@@ -821,238 +828,165 @@ class AnalyticsController extends Controller
         if ($seasonalityMean > 0) {
             $seasonality = array_map(fn($s) => $s / $seasonalityMean, $seasonality);
         }
-
         return [$level, $trend, $seasonality];
     }
 
-    private function holtWinters(array $data, int $seasonalPeriod = 12, int $forecastSteps = 6): array
+    private function constrainForecast(array $forecast, float $lastValue): array
     {
-        $n = count($data);
-
-        if ($n < $seasonalPeriod * 2) {
-            return $this->doubleExponentialSmoothingImproved($data, $forecastSteps);
-        }
-
-        list($alpha, $beta, $gamma) = $this->optimizeHoltWintersParameters($data);
-        list($level, $trend, $seasonality) = $this->initHoltWintersWithParams($data, $seasonalPeriod, $alpha, $beta, $gamma);
-
-        for ($t = 0; $t < $n; $t++) {
-            $oldLevel = $level;
-            $level = $alpha * $data[$t] + (1 - $alpha) * ($level + $trend);
-            $trend = $beta * ($level - $oldLevel) + (1 - $beta) * $trend;
-            $seasonIndex = $t % $seasonalPeriod;
-            $seasonality[$seasonIndex] = $gamma * ($data[$t] / $level) + (1 - $gamma) * $seasonality[$seasonIndex];
-        }
-
-        $forecast = [];
-        for ($k = 1; $k <= $forecastSteps; $k++) {
-            $seasonIndex = ($n + $k - 1) % $seasonalPeriod;
-            $forecast[] = ($level + $k * $trend) * $seasonality[$seasonIndex];
-        }
-
-        return $forecast;
+        $minValue = $lastValue * 0.3;
+        $maxValue = $lastValue * 2.0;
+        return array_map(fn($v) => max($minValue, min($maxValue, $v)), $forecast);
     }
 
-    // ==================== ВЫБОР МЕТОДА ПРОГНОЗИРОВАНИЯ ====================
+    private function smoothForecast(array $forecast): array
+    {
+        $smoothed = [];
+        $window = 3;
 
-    /**
-     * ВЫБОР МЕТОДА ПРОГНОЗИРОВАНИЯ В ЗАВИСИМОСТИ ОТ ОБЪЕМА ДАННЫХ
-     *
-     * < 3 месяцев: недостаточно данных
-     * 3-6 месяцев: простая экстраполяция (simpleExtrapolation)
-     * 7-14 месяцев: полная линейная регрессия
-     * 15-23 месяца: двойное экспоненциальное сглаживание
-     * 24+ месяцев: Хольта-Винтерса
-     *
-     * @param array $data Исторические данные (помесячные расходы)
-     * @param int $forecastSteps Количество шагов прогноза (месяцев)
-     * @return array|null Прогнозные значения или null при недостатке данных
-     */
-    private function selectForecastMethod(array $data, int $forecastSteps = 6): ?array
+        for ($i = 0; $i < count($forecast); $i++) {
+            $sum = 0;
+            $count = 0;
+            for ($j = -$window; $j <= $window; $j++) {
+                $idx = $i + $j;
+                if ($idx >= 0 && $idx < count($forecast)) {
+                    $sum += $forecast[$idx];
+                    $count++;
+                }
+            }
+            $smoothed[] = $sum / $count;
+        }
+        return $smoothed;
+    }
+
+    // ==================== ВЫБОР МЕТОДА ====================
+
+    private function selectForecastMethod(array $data, int $forecastSteps = 3): ?array
     {
         $n = count($data);
 
-        // < 3 месяцев: недостаточно данных
-        if ($n < 3) {
-            return null;
-        }
-
-        // 3-6 месяцев: простая экстраполяция
-        if ($n < 7) {
-            return $this->simpleExtrapolation($data, $forecastSteps);
-        }
-
-        // 7-14 месяцев: полная линейная регрессия
-        if ($n < 15) {
-            return $this->linearRegression($data, $forecastSteps);
-        }
-
-        // 15-23 месяца: двойное экспоненциальное сглаживание
-        if ($n < 24) {
-            return $this->doubleExponentialSmoothingImproved($data, $forecastSteps);
-        }
-
-        // 24+ месяцев: Хольта-Винтерса
+        if ($n < 3) return null;
+        if ($n < 7) return $this->simpleExtrapolation($data, $forecastSteps);
+        if ($n < 12) return $this->linearRegression($data, $forecastSteps);
+        if ($n < 24) return $this->doubleExponentialSmoothingImproved($data, $forecastSteps);
         return $this->holtWinters($data, 12, $forecastSteps);
     }
 
-    // ==================== ПРОГНОЗ НА 30 ДНЕЙ ====================
+    // ==================== ОСНОВНОЙ ПУБЛИЧНЫЙ МЕТОД FORECAST ====================
 
-    public function forecastNext30Days(Request $request): \Illuminate\Http\JsonResponse
+    public function forecast(Request $request): \Illuminate\Http\JsonResponse
     {
         try {
             $userId = $this->getUserId();
-            if (!Transaction::where('user_id', $userId)->exists()) {
-                return response()->json(['status' => 'success', 'data' => ['has_data' => false, 'message' => 'Нет данных для прогноза. Добавьте транзакции.']]);
+
+            $hasTransactions = Transaction::where('user_id', $userId)->exists();
+
+            if (!$hasTransactions) {
+                return response()->json([
+                    'status' => 'success',
+                    'data' => [
+                        'has_data' => false,
+                        'message' => 'Нет данных для прогноза. Добавьте транзакции.'
+                    ]
+                ]);
             }
 
-            $historicalData = $this->getMonthlyExpensesArray($userId, 24);
-            $filteredData = array_values(array_filter($historicalData, fn($v) => $v > 0));
+            $completeMonthsData = $this->getCompleteMonthsExpensesArray($userId, 30);
+            $monthsCount = count($completeMonthsData);
 
-            $monthsCount = count($filteredData);
-
-            // Проверка на минимальное количество данных
             if ($monthsCount < 3) {
                 return response()->json([
                     'status' => 'success',
                     'data' => [
                         'has_data' => true,
                         'forecast_available' => false,
-                        'message' => 'Недостаточно данных для прогноза. Накопите минимум 3 месяца истории расходов.',
-                        'months_available' => $monthsCount,
-                        'months_required' => 3
+                        'message' => 'Недостаточно полных месяцев данных. Накопите минимум 3 месяца истории.',
+                        'complete_months_available' => $monthsCount
                     ]
                 ]);
             }
 
-            // Выбор метода прогнозирования
-            $monthlyForecast = $this->selectForecastMethod($filteredData, 6);
+            $monthlyForecast = $this->selectForecastMethod($completeMonthsData, 3);
 
-            // Если прогноз не получен (должно быть обработано выше, но на всякий случай)
             if ($monthlyForecast === null) {
                 return response()->json([
                     'status' => 'success',
                     'data' => [
                         'has_data' => true,
                         'forecast_available' => false,
-                        'message' => 'Не удалось построить прогноз',
-                        'months_available' => $monthsCount
+                        'message' => 'Не удалось построить прогноз'
                     ]
                 ]);
             }
+
+            $remainingMonth = $this->forecastRemainingCurrentMonth($userId);
+
+            $nextMonthDate = Carbon::now()->addMonth()->startOfMonth();
+            $lastCompleteMonthTotal = end($completeMonthsData);
+            $nextMonthSummary = $this->forecastFullMonthSummary($monthlyForecast[0], $nextMonthDate, $lastCompleteMonthTotal);
+
+            $secondMonthDate = Carbon::now()->addMonths(2)->startOfMonth();
+            $secondMonthSummary = $this->forecastFullMonthSummary($monthlyForecast[1] ?? $monthlyForecast[0], $secondMonthDate, $monthlyForecast[0]);
 
             $lastCompleteMonth = Carbon::now()->subMonth()->startOfMonth();
             $baselineTotal = $this->getMonthlyExpenseAmount($userId, $lastCompleteMonth->year, $lastCompleteMonth->month);
             $dailyBaseline = $baselineTotal / $lastCompleteMonth->daysInMonth;
 
-            $nextMonthForecast = $monthlyForecast[0] ?? $dailyBaseline * 30;
-            $nextMonthDaily = $nextMonthForecast / 30;
+            $trend = $this->calculateTrendFromData($completeMonthsData);
+            $seasonalFactor = $this->calculateSeasonalFactor($userId, $completeMonthsData);
 
-            $dayOfWeekFactors = $this->calculateDayOfWeekFactors($userId);
-            $trend = $this->calculateTrendFromData($filteredData);
-            $seasonalFactor = $this->calculateSeasonalFactor($userId, $historicalData);
-
-            // Дневной прогноз
-            $dailyForecasts = [];
-            $totalForecast = 0;
-            $currentDate = Carbon::now()->copy();
-
-            for ($i = 0; $i < 30; $i++) {
-                $dayOfWeek = $currentDate->dayOfWeek;
-                $dayFactor = $dayOfWeekFactors[$dayOfWeek] ?? 1.0;
-                $dailyForecast = ($dailyBaseline * $dayFactor * $trend + $nextMonthDaily) / 2;
-                $dailyForecasts[] = [
-                    'date' => $currentDate->format('Y-m-d'),
-                    'day_of_week' => $this->getRussianDayOfWeek($currentDate->dayOfWeek),
-                    'forecast' => round($dailyForecast, 2)
-                ];
-                $totalForecast += $dailyForecast;
-                $currentDate->addDay();
-            }
-
-            // Прогноз по категориям
             $categoryForecasts = $this->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $trend);
 
-            $interval = $this->getPredictionInterval($userId, $totalForecast, 30);
             $confidence = $this->calculateConfidence($userId);
-
-            $methodName = $this->getMethodName($monthsCount);
-            $modelMetrics = $this->calculateModelMetrics($filteredData, $monthlyForecast);
-
-            // Формируем сообщение о надежности в зависимости от объема данных
-            $reliabilityMessage = $this->getReliabilityMessage($monthsCount);
+            $modelMetrics = $this->calculateModelMetrics($completeMonthsData, $monthlyForecast);
 
             return response()->json([
                 'status' => 'success',
                 'data' => [
                     'has_data' => true,
                     'forecast_available' => true,
-                    'model' => $methodName,
-                    'period' => ['start' => Carbon::now()->format('Y-m-d'), 'end' => Carbon::now()->addDays(29)->format('Y-m-d'), 'days' => 30],
-                    'total_forecast' => round($totalForecast, 2),
-                    'daily_average' => round($totalForecast / 30, 2),
-                    'daily_forecasts' => $dailyForecasts,
-                    'monthly_forecast' => array_map(fn($v) => round($v, 2), $monthlyForecast),
-                    'category_forecasts' => $categoryForecasts,
-                    'confidence_interval' => $interval,
-                    'trend_factor' => round($trend, 3),
-                    'seasonal_factor' => round($seasonalFactor, 2),
-                    'model_metrics' => $modelMetrics,
+                    'model' => $this->getMethodName($monthsCount),
                     'confidence' => $confidence['percent'],
                     'confidence_level' => $confidence['level'],
                     'confidence_text' => $confidence['text'],
-                    'reliability_message' => $reliabilityMessage,
-                    'data_summary' => [
-                        'months_analyzed' => $monthsCount,
-                        'method_thresholds' => [
-                            'simple_extrapolation' => '3-6 месяцев',
-                            'linear_regression' => '7-14 месяцев',
-                            'double_exponential' => '15-23 месяцев',
-                            'holt_winters' => '24+ месяцев'
-                        ]
-                    ]
+                    'complete_months_used' => $monthsCount,
+                    'remaining_current_month' => $remainingMonth,
+                    'next_month' => $nextMonthSummary,
+                    'second_month' => $secondMonthSummary,
+                    'category_forecasts' => $categoryForecasts,
+                    'trend_factor' => round($trend, 3),
+                    'seasonal_factor' => round($seasonalFactor, 2),
+                    'model_metrics' => $modelMetrics,
+                    'reliability_message' => $this->getReliabilityMessage($monthsCount)
                 ]
             ]);
+
         } catch (\Exception $e) {
-            Log::error('Forecast30Days error: ' . $e->getMessage());
+            Log::error('Forecast error: ' . $e->getMessage());
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
 
+    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ ОТВЕТА ====================
+
     private function getReliabilityMessage(int $monthsCount): string
     {
-        if ($monthsCount < 3) {
-            return '⚠️ Недостаточно данных для построения прогноза.';
-        }
-        if ($monthsCount < 7) {
-            return '⚠️ Прогноз построен на основе минимальных данных (3-6 месяцев). Рекомендуется накопить больше истории для повышения точности.';
-        }
-        if ($monthsCount < 15) {
-            return '📊 Прогноз имеет хорошую точность. Для улучшения рекомендуется накопить 15+ месяцев данных.';
-        }
-        if ($monthsCount < 24) {
-            return '✅ Прогноз имеет высокую точность.';
-        }
+        if ($monthsCount < 7) return '⚠️ Прогноз на основе минимальных данных (3-6 месяцев). Рекомендуется накопить больше истории.';
+        if ($monthsCount < 12) return '📊 Прогноз имеет хорошую точность. Для улучшения рекомендуется накопить 12+ месяцев данных.';
+        if ($monthsCount < 24) return '✅ Прогноз имеет высокую точность.';
         return '✅ Прогноз имеет высокую точность с учетом сезонности.';
     }
 
     private function getMethodName(int $monthsCount): string
     {
-        if ($monthsCount < 7) {
-            return 'SimpleExtrapolation';
-        }
-        if ($monthsCount < 15) {
-            return 'LinearRegression';
-        }
-        if ($monthsCount < 24) {
-            return 'DoubleExponentialSmoothing';
-        }
+        if ($monthsCount < 7) return 'SimpleExtrapolation';
+        if ($monthsCount < 12) return 'LinearRegression';
+        if ($monthsCount < 24) return 'DoubleExponentialSmoothing';
         return 'HoltWinters';
     }
 
     private function calculateDayOfWeekFactors(int $userId): array
     {
-        $defaultFactors = [0 => 1.0, 1 => 0.9, 2 => 0.9, 3 => 0.9, 4 => 1.2, 5 => 1.1, 6 => 1.3];
+        $defaultFactors = [0 => 1.0, 1 => 0.85, 2 => 0.85, 3 => 0.85, 4 => 1.15, 5 => 1.2, 6 => 1.2];
 
         $startDate = Carbon::now()->subMonths(3);
         $endDate = Carbon::now();
@@ -1062,43 +996,60 @@ class AnalyticsController extends Controller
             ->whereBetween('date', [$startDate, $endDate])
             ->get();
 
-        if ($transactions->count() < 10) return $defaultFactors;
+        if ($transactions->count() < 10) {
+            return $defaultFactors;
+        }
 
         $baseCurrency = Currency::where('code', 'BYN')->first();
-        if (!$baseCurrency) return $defaultFactors;
+        if (!$baseCurrency) {
+            return $defaultFactors;
+        }
 
         $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
 
         $dailyTotals = array_fill(0, 7, 0.0);
-        $dailyCounts = array_fill(0, 7, 0);
+        $dailyWeights = array_fill(0, 7, 0.0);
+
+        $now = Carbon::now();
 
         foreach ($transactions as $transaction) {
             $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
             $dayOfWeek = Carbon::parse($transaction->date)->dayOfWeek;
-            $dailyTotals[$dayOfWeek] += $amountInBase;
-            $dailyCounts[$dayOfWeek]++;
+            $daysAgo = Carbon::parse($transaction->date)->diffInDays($now);
+            $weight = exp(-$daysAgo / 45);
+
+            $dailyTotals[$dayOfWeek] += $amountInBase * $weight;
+            $dailyWeights[$dayOfWeek] += $weight;
         }
 
         $dailyAverages = [];
         for ($i = 0; $i < 7; $i++) {
-            $dailyAverages[$i] = $dailyCounts[$i] > 0 ? $dailyTotals[$i] / $dailyCounts[$i] : 0;
+            $dailyAverages[$i] = $dailyWeights[$i] > 0
+                ? $dailyTotals[$i] / $dailyWeights[$i]
+                : 0;
         }
 
-        $totalAverage = 0;
-        $daysWithData = 0;
-        for ($i = 0; $i < 7; $i++) {
-            if ($dailyAverages[$i] > 0) {
-                $totalAverage += $dailyAverages[$i];
-                $daysWithData++;
-            }
+        $totalWeightedSum = array_sum($dailyTotals);
+        $totalWeight = array_sum($dailyWeights);
+
+        if ($totalWeight <= 0) {
+            return $defaultFactors;
         }
-        $totalAverage = $daysWithData > 0 ? $totalAverage / $daysWithData : 1.0;
+
+        $totalAverage = $totalWeightedSum / $totalWeight;
+
+        if ($totalAverage <= 0) {
+            return $defaultFactors;
+        }
+
+        $dataConfidence = min(0.8, $transactions->count() / 100);
 
         $factors = [];
         for ($i = 0; $i < 7; $i++) {
-            if ($dailyAverages[$i] > 0 && $totalAverage > 0) {
-                $factor = $dailyAverages[$i] / $totalAverage;
-                $factors[$i] = max(0.5, min(2.0, $factor));
+            if ($dailyAverages[$i] > 0) {
+                $calculatedFactor = $dailyAverages[$i] / $totalAverage;
+                $calculatedFactor = max(0.6, min(1.8, $calculatedFactor));
+                $factors[$i] = ($calculatedFactor * $dataConfidence) + ($defaultFactors[$i] * (1 - $dataConfidence));
             } else {
                 $factors[$i] = $defaultFactors[$i];
             }
@@ -1120,8 +1071,6 @@ class AnalyticsController extends Controller
         $lastCompleteMonth = Carbon::now()->subMonth()->startOfMonth();
         $daysInMonth = $lastCompleteMonth->daysInMonth;
 
-        $baseCurrency = Currency::where('code', 'BYN')->first();
-
         foreach ($categories as $category) {
             $categoryMonthlyTotal = $this->getCategoryMonthlyExpense($userId, $category->id, $lastCompleteMonth->year, $lastCompleteMonth->month);
 
@@ -1136,13 +1085,10 @@ class AnalyticsController extends Controller
                 }
             }
 
-            if ($categoryMonthlyTotal <= 0) {
-                continue;
-            }
+            if ($categoryMonthlyTotal <= 0) continue;
 
             $categoryDailyBaseline = $categoryMonthlyTotal / $daysInMonth;
             $categoryTotal = $categoryDailyBaseline * 30 * max(0.5, min(1.5, $seasonalFactor)) * max(0.95, min(1.05, $trend));
-
             $sharePercent = $dailyBaseline > 0 ? round(($categoryDailyBaseline / $dailyBaseline) * 100, 1) : 0;
 
             $forecasts[] = [
@@ -1156,20 +1102,16 @@ class AnalyticsController extends Controller
         }
 
         usort($forecasts, fn($a, $b) => $b['forecast'] <=> $a['forecast']);
-
         return array_slice($forecasts, 0, 10);
     }
 
     private function calculateTrendFromData(array $data): float
     {
         if (count($data) < 4) return 1.0;
-
         $n = count($data);
         $firstHalf = array_sum(array_slice($data, 0, floor($n / 2))) / floor($n / 2);
         $secondHalf = array_sum(array_slice($data, floor($n / 2))) / ceil($n / 2);
-
         if ($firstHalf == 0) return 1.0;
-
         $trend = $secondHalf / $firstHalf;
         return max(0.95, min(1.05, $trend));
     }
@@ -1193,7 +1135,6 @@ class AnalyticsController extends Controller
             }
         }
         $lastYearAvg = $lastYearAvg / max(1, $count);
-
         if ($lastYearAvg == 0) return 1.0;
 
         $currentMonthAmount = $this->getMonthlyExpenseAmount($userId, $currentYear - 1, $currentMonth);
@@ -1214,7 +1155,6 @@ class AnalyticsController extends Controller
         for ($i = 0; $i < $n; $i++) {
             $actual = $historical[count($historical) - $n + $i];
             $predicted = $forecast[$i];
-
             if ($actual > 0) {
                 $mapeSum += abs(($actual - $predicted) / $actual);
                 $validCount++;
@@ -1225,68 +1165,29 @@ class AnalyticsController extends Controller
         $mape = $validCount > 0 ? ($mapeSum / $validCount) * 100 : 0;
         $mse = $n > 0 ? $mseSum / $n : 0;
         $rmse = sqrt($mse);
-
         $interpretation = $mape < 10 ? 'Высокая точность' : ($mape < 20 ? 'Хорошая точность' : ($mape < 30 ? 'Приемлемая точность' : 'Низкая точность'));
 
-        return [
-            'mape' => round($mape, 1),
-            'mse' => round($mse, 2),
-            'rmse' => round($rmse, 2),
-            'interpretation' => $interpretation
-        ];
-    }
-
-    private function getPredictionInterval(int $userId, float $forecast, int $horizonDays = 30): array
-    {
-        $monthlyExpenses = $this->getMonthlyExpensesArray($userId, 12);
-        $cv = $this->calculateCoefficientOfVariation($monthlyExpenses);
-
-        $horizonMultiplier = sqrt($horizonDays / 30);
-        $baseErrorMargin = min(0.5, $cv);
-        $errorMargin = min(0.7, $baseErrorMargin * $horizonMultiplier);
-
-        if ($horizonDays < 7) {
-            $errorMargin = $errorMargin * 0.8;
-        }
-
-        return [
-            'lower' => round($forecast * (1 - $errorMargin), 2),
-            'upper' => round($forecast * (1 + $errorMargin), 2),
-            'margin_percent' => round($errorMargin * 100, 1),
-            'horizon_days' => $horizonDays,
-            'cv' => round($cv, 3)
-        ];
-    }
-
-    private function calculateCoefficientOfVariation(array $values): float
-    {
-        $values = array_filter($values, fn($v) => $v > 0);
-        $n = count($values);
-        if ($n < 3) return 0.5;
-        $mean = array_sum($values) / $n;
-        if ($mean == 0) return 0.5;
-        $variance = array_sum(array_map(fn($x) => pow($x - $mean, 2), $values)) / $n;
-        $stdDev = sqrt($variance);
-        return $stdDev / $mean;
+        return ['mape' => round($mape, 1), 'mse' => round($mse, 2), 'rmse' => round($rmse, 2), 'interpretation' => $interpretation];
     }
 
     private function calculateConfidence(int $userId): array
     {
-        $oldest = Transaction::where('user_id', $userId)->orderBy('date', 'asc')->first();
-        if (!$oldest) return ['percent' => 0, 'level' => 'low', 'text' => 'Нет данных для анализа'];
+        $oldest = Transaction::where('user_id', $userId)
+            ->orderBy('date', 'asc')
+            ->first();
+
+        if (!$oldest) return ['percent' => 0, 'level' => 'low', 'text' => 'Нет данных'];
 
         $monthsOfData = Carbon::parse($oldest->date)->diffInMonths(Carbon::now());
         $monthsScore = $this->calculateMonthsScore($monthsOfData);
-
-        $monthlyExpenses = $this->getMonthlyExpensesArray($userId, 12);
+        $monthlyExpenses = $this->getCompleteMonthsExpensesArray($userId, 12);
         $stabilityScore = $this->calculateStabilityScore($monthlyExpenses);
-
         $totalScore = ($monthsScore * 0.5) + ($stabilityScore * 0.5);
         $totalScore = round(min(100, max(0, $totalScore)));
 
-        if ($totalScore >= 70) return ['percent' => $totalScore, 'level' => 'high', 'text' => 'Высокая надежность. Прогноз статистически значим.'];
-        if ($totalScore >= 45) return ['percent' => $totalScore, 'level' => 'medium', 'text' => 'Средняя надежность. Прогноз требует осторожности.'];
-        return ['percent' => $totalScore, 'level' => 'low', 'text' => 'Низкая надежность. Недостаточно данных для точного прогноза.'];
+        if ($totalScore >= 70) return ['percent' => $totalScore, 'level' => 'high', 'text' => 'Высокая надежность'];
+        if ($totalScore >= 45) return ['percent' => $totalScore, 'level' => 'medium', 'text' => 'Средняя надежность'];
+        return ['percent' => $totalScore, 'level' => 'low', 'text' => 'Низкая надежность'];
     }
 
     private function calculateMonthsScore(int $months): float

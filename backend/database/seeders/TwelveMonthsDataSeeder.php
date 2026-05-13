@@ -12,34 +12,33 @@ use Illuminate\Support\Facades\Hash;
 use Carbon\Carbon;
 
 /**
- * Сидер для генерации тестовых данных за 15 ПОЛНЫХ месяцев + текущий месяц
+ * Сидер для генерации тестовых данных за 12 ПОЛНЫХ месяцев + текущий месяц
  *
  * Генерирует:
- * - 15 полных месяцев (полтора года истории)
+ * - 12 полных месяцев (ровно год истории)
  * - Транзакции в текущем месяце ТОЛЬКО за прошедшие дни (до сегодня)
- * - Аномалии: 1-2 в месяц (реалистичное количество)
  *
- * 15 месяцев — это порог переключения с линейной регрессии
- * на двойное экспоненциальное сглаживание (Double Exponential Smoothing)
+ * 12 месяцев — это промежуточный этап между LinearRegression (7-14 мес)
+ * и DoubleExponentialSmoothing (15-23 мес)
  *
- * Запуск: php artisan db:seed --class=FifteenMonthsDataSeeder
+ * Запуск: php artisan db:seed --class=TwelveMonthsDataSeeder
  *
  * ВНИМАНИЕ: Перед запуском очистите данные пользователя самостоятельно!
  */
-class FifteenMonthsDataSeeder extends Seeder
+class TwelveMonthsDataSeeder extends Seeder
 {
     public function run(): void
     {
-        // Генерируем 15 полных месяцев (без текущего)
-        $completeMonths = 15;
-        $label = '15 полных месяцев + текущий';
+        // Генерируем 12 полных месяцев (без текущего)
+        $completeMonths = 12;
+        $label = '12 полных месяцев + текущий';
 
         // Получаем или создаем пользователя
         $user = User::first();
         if (!$user) {
             $user = User::create([
                 'name' => 'Test ' . $label . ' User',
-                'email' => 'test_15months@test.com',
+                'email' => 'test_12months@test.com',
                 'password' => Hash::make('password'),
             ]);
         }
@@ -98,46 +97,43 @@ class FifteenMonthsDataSeeder extends Seeder
         }
 
         $now = Carbon::now();
-        $baseIncome = 2700;
+        $baseIncome = 2800;
         $transactionsCount = 0;
-        $totalAnomalies = 0;
 
-        // ========== 1. ГЕНЕРАЦИЯ 15 ПОЛНЫХ МЕСЯЦЕВ (без текущего) ==========
+        // ========== 1. ГЕНЕРАЦИЯ 12 ПОЛНЫХ МЕСЯЦЕВ (без текущего) ==========
+        // Начинаем с месяца, который был 12 месяцев назад
         for ($i = $completeMonths; $i >= 1; $i--) {
             $monthDate = $now->copy()->subMonths($i);
             $daysInMonth = $monthDate->daysInMonth;
             $monthName = $monthDate->translatedFormat('F Y');
             $monthNumber = $monthDate->month;
-
-            // Счетчик аномалий в текущем месяце (максимум 2)
-            $anomaliesThisMonth = 0;
-            $maxAnomaliesPerMonth = rand(1, 2); // 1-2 аномалии в месяц
+            $year = $monthDate->year;
 
             // Сезонные коэффициенты
             $seasonalIncomeFactor = 1;
             $seasonalExpenseFactor = 1;
 
             if ($monthNumber == 12) {
-                $seasonalIncomeFactor = 1.28;
-                $seasonalExpenseFactor = 1.40;
+                $seasonalIncomeFactor = 1.25;
+                $seasonalExpenseFactor = 1.35;
             } elseif ($monthNumber == 1) {
-                $seasonalExpenseFactor = 1.22;
+                $seasonalExpenseFactor = 1.20;
             } elseif (in_array($monthNumber, [6, 7, 8])) {
-                $seasonalExpenseFactor = 1.28;
+                $seasonalExpenseFactor = 1.25;
             } elseif ($monthNumber == 9) {
-                $seasonalExpenseFactor = 1.18;
+                $seasonalExpenseFactor = 1.15;
             } elseif (in_array($monthNumber, [3, 4])) {
                 $seasonalIncomeFactor = 1.05;
             }
 
-            // Тренд роста за 15 месяцев (~7.5% всего)
+            // Тренд роста за 12 месяцев (~6% всего)
             $trendFactor = 1 + ($completeMonths - $i) * 0.005;
 
             // ========== ДОХОДЫ ==========
 
             // Зарплата
             $salary = round($baseIncome * $trendFactor * $seasonalIncomeFactor, 0);
-            $finalSalary = max(2300, round($salary * (1 + (rand(-20, 20) / 1000)), 2));
+            $finalSalary = max(2400, round($salary * (1 + (rand(-20, 20) / 1000)), 2));
 
             $transaction = Transaction::create([
                 'user_id' => $userId,
@@ -155,9 +151,9 @@ class FifteenMonthsDataSeeder extends Seeder
             ]);
             $transactionsCount++;
 
-            // Фриланс (70% вероятность)
+            // Фриланс
             if (rand(1, 100) <= 70) {
-                $freelanceAmount = round(rand(180, 600) * $trendFactor * $seasonalIncomeFactor, 2);
+                $freelanceAmount = round(rand(200, 600) * $trendFactor * $seasonalIncomeFactor, 2);
                 $transaction = Transaction::create([
                     'user_id' => $userId,
                     'amount' => $freelanceAmount,
@@ -175,8 +171,8 @@ class FifteenMonthsDataSeeder extends Seeder
                 $transactionsCount++;
             }
 
-            // Инвестиции (40% вероятность)
-            if (rand(1, 100) <= 40) {
+            // Инвестиции
+            if (rand(1, 100) <= 45) {
                 $investmentAmount = round(rand(50, 300) * $trendFactor * $seasonalIncomeFactor, 2);
                 $transaction = Transaction::create([
                     'user_id' => $userId,
@@ -195,7 +191,7 @@ class FifteenMonthsDataSeeder extends Seeder
                 $transactionsCount++;
             }
 
-            // Подарки (только декабрь и апрель)
+            // Подарки (разовый доход)
             if ($monthNumber == 12 || $monthNumber == 4) {
                 $giftAmount = rand(100, 400);
                 $isAnomaly = ($monthNumber == 4); // День рождения - разовый доход
@@ -214,19 +210,15 @@ class FifteenMonthsDataSeeder extends Seeder
                     'transaction_id' => $transaction->id,
                 ]);
                 $transactionsCount++;
-                if ($isAnomaly) {
-                    $anomaliesThisMonth++;
-                    $totalAnomalies++;
-                }
             }
 
             // ========== РАСХОДЫ ==========
-            $baseExpensePercent = rand(68, 84) / 100;
-            $targetMonthlyExpense = round($finalSalary * $baseExpensePercent * $seasonalExpenseFactor * (1 + (rand(-50, 50) / 1000)), 2);
+            $baseExpensePercent = rand(70, 82) / 100;
+            $targetMonthlyExpense = round($finalSalary * $baseExpensePercent * $seasonalExpenseFactor, 2);
 
             $expenseData = [
-                'Продукты' => ['min_percent' => 23, 'max_percent' => 33],
-                'Транспорт' => ['min_percent' => 8, 'max_percent' => 14],
+                'Продукты' => ['min_percent' => 25, 'max_percent' => 35],
+                'Транспорт' => ['min_percent' => 8, 'max_percent' => 15],
                 'Развлечения' => ['min_percent' => 5, 'max_percent' => 12],
                 'Коммунальные услуги' => ['min_percent' => 12, 'max_percent' => 18],
                 'Одежда' => ['min_percent' => 5, 'max_percent' => 12],
@@ -236,14 +228,14 @@ class FifteenMonthsDataSeeder extends Seeder
             ];
 
             $descriptions = [
-                'Продукты' => ['Покупка продуктов', 'Супермаркет', 'Продукты на неделю', 'Еда', 'Магазин'],
-                'Транспорт' => ['Проездной', 'Такси', 'Бензин', 'Парковка', 'Метро'],
-                'Развлечения' => ['Кино', 'Театр', 'Кафе', 'Концерт', 'Бильярд'],
-                'Коммунальные услуги' => ['Комуналка', 'Электричество', 'Квартплата', 'Вода', 'Отопление'],
+                'Продукты' => ['Покупка продуктов', 'Супермаркет', 'Продукты на неделю', 'Еда'],
+                'Транспорт' => ['Проездной', 'Такси', 'Бензин', 'Парковка'],
+                'Развлечения' => ['Кино', 'Ресторан', 'Кафе', 'Концерт'],
+                'Коммунальные услуги' => ['Комуналка', 'Электричество', 'Квартплата', 'Вода'],
                 'Одежда' => ['Одежда', 'Обувь', 'Аксессуары'],
-                'Здоровье' => ['Аптека', 'Врач', 'Спортзал', 'Витамины', 'Лекарства'],
-                'Кафе и рестораны' => ['Кафе', 'Ресторан', 'Обед', 'Ужин', 'Кофе'],
-                'Образование' => ['Курсы', 'Учебники', 'Тренинг', 'Книги'],
+                'Здоровье' => ['Аптека', 'Врач', 'Спортзал', 'Витамины'],
+                'Кафе и рестораны' => ['Кафе', 'Ресторан', 'Обед', 'Ужин'],
+                'Образование' => ['Курсы', 'Учебники', 'Тренинг'],
             ];
 
             $paymentMethods = ['cash', 'card', 'transfer'];
@@ -254,7 +246,7 @@ class FifteenMonthsDataSeeder extends Seeder
 
                 if ($categoryTotal <= 0) continue;
 
-                $transactionCount = rand(2, 6);
+                $transactionCount = rand(2, 7);
                 $remaining = $categoryTotal;
 
                 for ($j = 0; $j < $transactionCount; $j++) {
@@ -266,30 +258,31 @@ class FifteenMonthsDataSeeder extends Seeder
 
                     $remaining -= $amount;
 
+                    // Иногда добавляем аномальные расходы (крупные покупки)
                     $isAnomaly = false;
 
-                    // Аномалии: только если не превысили лимит на месяц (1-2 аномалии)
-                    if ($anomaliesThisMonth < $maxAnomaliesPerMonth) {
-                        // Крупная покупка в категории Одежда (5% вероятность)
-                        if ($categoryName == 'Одежда' && rand(1, 100) <= 5) {
-                            $amount = $amount * rand(3, 5);
-                            $isAnomaly = true;
-                        }
-                        // Крупная покупка в категории Развлечения (4% вероятность)
-                        elseif ($categoryName == 'Развлечения' && rand(1, 100) <= 4) {
-                            $amount = $amount * rand(3, 6);
-                            $isAnomaly = true;
-                        }
-                        // Медицинские расходы (3% вероятность)
-                        elseif ($categoryName == 'Здоровье' && rand(1, 100) <= 3) {
-                            $amount = $amount * rand(2, 4);
-                            $isAnomaly = true;
-                        }
+                    // Крупные покупки в категории Одежда (10% вероятность)
+                    if ($categoryName == 'Одежда' && rand(1, 100) <= 10) {
+                        $amount = $amount * rand(3, 6);
+                        $isAnomaly = true;
                     }
 
-                    if ($isAnomaly) {
-                        $anomaliesThisMonth++;
-                        $totalAnomalies++;
+                    // Крупные покупки в категории Развлечения (8% вероятность)
+                    if ($categoryName == 'Развлечения' && rand(1, 100) <= 8) {
+                        $amount = $amount * rand(4, 8);
+                        $isAnomaly = true;
+                    }
+
+                    // Крупные покупки (техника, мебель)
+                    if ($categoryName == 'Развлечения' && rand(1, 100) <= 5) {
+                        $amount = rand(500, 1500);
+                        $isAnomaly = true;
+                    }
+
+                    // Медицинские расходы (аномалия)
+                    if ($categoryName == 'Здоровье' && rand(1, 100) <= 6) {
+                        $amount = $amount * rand(3, 5);
+                        $isAnomaly = true;
                     }
 
                     $transaction = Transaction::create([
@@ -310,16 +303,16 @@ class FifteenMonthsDataSeeder extends Seeder
                 }
             }
 
-            // Крупная сезонная аномалия (например, покупка техники) - не чаще 1 раза в квартал
-            $seasonalMonths = [3, 6, 9, 12];
-            if (in_array($monthNumber, $seasonalMonths) && $anomaliesThisMonth < $maxAnomaliesPerMonth && rand(1, 100) <= 20) {
-                $bigPurchaseAmount = rand(800, 2000);
+            // Добавляем аномальные расходы в некоторые месяцы (покупка техники, мебели) - 25% вероятность
+            if (in_array($monthNumber, [9, 12, 3, 6]) && rand(1, 100) <= 25) {
+                $bigPurchaseAmount = rand(500, 1800);
+                $descriptions_list = ['Покупка техники', 'Мебель', 'Ремонт', 'Крупная покупка'];
                 $transaction = Transaction::create([
                     'user_id' => $userId,
                     'amount' => $bigPurchaseAmount,
                     'currency_id' => $defaultCurrencyId,
                     'type' => 'expense',
-                    'description' => 'Крупная покупка',
+                    'description' => $descriptions_list[array_rand($descriptions_list)],
                     'date' => $monthDate->copy()->day(rand(1, $daysInMonth)),
                     'payment_method' => 'card',
                     'is_anomaly' => true,
@@ -329,13 +322,11 @@ class FifteenMonthsDataSeeder extends Seeder
                     'transaction_id' => $transaction->id,
                 ]);
                 $transactionsCount++;
-                $anomaliesThisMonth++;
-                $totalAnomalies++;
             }
 
-            // Отпуск (только летом, не чаще 1 раза в год)
-            if (in_array($monthNumber, [7, 8]) && $anomaliesThisMonth < $maxAnomaliesPerMonth && rand(1, 100) <= 15) {
-                $vacationAmount = rand(1000, 2500);
+            // Отпуск (сезонная аномалия) - летом
+            if (in_array($monthNumber, [7, 8]) && rand(1, 100) <= 35) {
+                $vacationAmount = rand(800, 2000);
                 $transaction = Transaction::create([
                     'user_id' => $userId,
                     'amount' => $vacationAmount,
@@ -351,14 +342,13 @@ class FifteenMonthsDataSeeder extends Seeder
                     'transaction_id' => $transaction->id,
                 ]);
                 $transactionsCount++;
-                $anomaliesThisMonth++;
-                $totalAnomalies++;
             }
         }
 
         // ========== 2. ГЕНЕРАЦИЯ ТРАНЗАКЦИЙ В ТЕКУЩЕМ МЕСЯЦЕ (ТОЛЬКО ПРОШЕДШИЕ ДНИ) ==========
         $currentDate = Carbon::now();
         $currentMonth = $currentDate->month;
+        $currentYear = $currentDate->year;
         $currentDay = $currentDate->day;
         $monthName = $currentDate->translatedFormat('F Y');
 
@@ -367,14 +357,14 @@ class FifteenMonthsDataSeeder extends Seeder
         $seasonalExpenseFactor = 1;
 
         if ($currentMonth == 12) {
-            $seasonalIncomeFactor = 1.28;
-            $seasonalExpenseFactor = 1.40;
+            $seasonalIncomeFactor = 1.25;
+            $seasonalExpenseFactor = 1.35;
         } elseif ($currentMonth == 1) {
-            $seasonalExpenseFactor = 1.22;
+            $seasonalExpenseFactor = 1.20;
         } elseif (in_array($currentMonth, [6, 7, 8])) {
-            $seasonalExpenseFactor = 1.28;
+            $seasonalExpenseFactor = 1.25;
         } elseif ($currentMonth == 9) {
-            $seasonalExpenseFactor = 1.18;
+            $seasonalExpenseFactor = 1.15;
         } elseif (in_array($currentMonth, [3, 4])) {
             $seasonalIncomeFactor = 1.05;
         }
@@ -382,11 +372,11 @@ class FifteenMonthsDataSeeder extends Seeder
         // Тренд для текущего месяца
         $trendFactor = 1 + $completeMonths * 0.005;
 
-        // ========== ДОХОДЫ В ТЕКУЩЕМ МЕСЯЦЕ ==========
+        // ========== ДОХОДЫ В ТЕКУЩЕМ МЕСЯЦЕ (только если зарплата уже прошла) ==========
         $salaryDay = rand(25, 28);
         if ($salaryDay <= $currentDay) {
             $salary = round($baseIncome * $trendFactor * $seasonalIncomeFactor, 0);
-            $finalSalary = max(2400, round($salary * (1 + (rand(-20, 20) / 1000)), 2));
+            $finalSalary = max(2500, round($salary * (1 + (rand(-20, 20) / 1000)), 2));
 
             $transaction = Transaction::create([
                 'user_id' => $userId,
@@ -405,17 +395,41 @@ class FifteenMonthsDataSeeder extends Seeder
             $transactionsCount++;
         }
 
-        // ========== РАСХОДЫ В ТЕКУЩЕМ МЕСЯЦЕ ==========
-        $baseExpensePercent = rand(68, 84) / 100;
+        // Фриланс в текущем месяце (только если дата прошла)
+        if (rand(1, 100) <= 65) {
+            $freelanceDay = rand(10, 20);
+            if ($freelanceDay <= $currentDay) {
+                $freelanceAmount = round(rand(200, 600) * $trendFactor * $seasonalIncomeFactor, 2);
+                $transaction = Transaction::create([
+                    'user_id' => $userId,
+                    'amount' => $freelanceAmount,
+                    'currency_id' => $defaultCurrencyId,
+                    'type' => 'income',
+                    'description' => 'Проект фриланс',
+                    'date' => $currentDate->copy()->day($freelanceDay),
+                    'payment_method' => 'transfer',
+                    'is_anomaly' => false,
+                ]);
+                DB::table('category_transaction')->insert([
+                    'category_id' => $categories['Фриланс']->id,
+                    'transaction_id' => $transaction->id,
+                ]);
+                $transactionsCount++;
+            }
+        }
+
+        // ========== РАСХОДЫ В ТЕКУЩЕМ МЕСЯЦЕ (ТОЛЬКО ПРОШЕДШИЕ ДНИ) ==========
+        $baseExpensePercent = rand(70, 82) / 100;
         $avgMonthlyIncome = $baseIncome * $trendFactor;
         $targetMonthlyExpense = round($avgMonthlyIncome * $baseExpensePercent * $seasonalExpenseFactor, 2);
 
+        // Пропорционально распределяем расходы на прошедшие дни
         $daysInCurrentMonth = $currentDate->daysInMonth;
         $targetExpenseForPassedDays = $targetMonthlyExpense * ($currentDay / $daysInCurrentMonth);
 
         $expenseData = [
-            'Продукты' => ['min_percent' => 23, 'max_percent' => 33],
-            'Транспорт' => ['min_percent' => 8, 'max_percent' => 14],
+            'Продукты' => ['min_percent' => 25, 'max_percent' => 35],
+            'Транспорт' => ['min_percent' => 8, 'max_percent' => 15],
             'Развлечения' => ['min_percent' => 5, 'max_percent' => 12],
             'Коммунальные услуги' => ['min_percent' => 12, 'max_percent' => 18],
             'Одежда' => ['min_percent' => 5, 'max_percent' => 12],
@@ -425,14 +439,14 @@ class FifteenMonthsDataSeeder extends Seeder
         ];
 
         $descriptions = [
-            'Продукты' => ['Покупка продуктов', 'Супермаркет', 'Продукты на неделю', 'Еда', 'Магазин'],
-            'Транспорт' => ['Проездной', 'Такси', 'Бензин', 'Парковка', 'Метро'],
-            'Развлечения' => ['Кино', 'Театр', 'Кафе', 'Концерт', 'Бильярд'],
-            'Коммунальные услуги' => ['Комуналка', 'Электричество', 'Квартплата', 'Вода', 'Отопление'],
+            'Продукты' => ['Покупка продуктов', 'Супермаркет', 'Продукты на неделю', 'Еда'],
+            'Транспорт' => ['Проездной', 'Такси', 'Бензин', 'Парковка'],
+            'Развлечения' => ['Кино', 'Ресторан', 'Кафе', 'Концерт'],
+            'Коммунальные услуги' => ['Комуналка', 'Электричество', 'Квартплата', 'Вода'],
             'Одежда' => ['Одежда', 'Обувь', 'Аксессуары'],
-            'Здоровье' => ['Аптека', 'Врач', 'Спортзал', 'Витамины', 'Лекарства'],
-            'Кафе и рестораны' => ['Кафе', 'Ресторан', 'Обед', 'Ужин', 'Кофе'],
-            'Образование' => ['Курсы', 'Учебники', 'Тренинг', 'Книги'],
+            'Здоровье' => ['Аптека', 'Врач', 'Спортзал', 'Витамины'],
+            'Кафе и рестораны' => ['Кафе', 'Ресторан', 'Обед', 'Ужин'],
+            'Образование' => ['Курсы', 'Учебники', 'Тренинг'],
         ];
 
         $paymentMethods = ['cash', 'card', 'transfer'];
@@ -476,8 +490,8 @@ class FifteenMonthsDataSeeder extends Seeder
 
         $this->command->info("✅ Создано {$transactionsCount} транзакций для пользователя {$user->email}");
         $this->command->info("📊 Полных месяцев в истории: {$completeMonths}");
-        $this->command->info("🏷️ Аномальных транзакций: {$totalAnomalies} (≈ " . round($totalAnomalies / $completeMonths, 1) . " в месяц)");
         $this->command->info("📅 Текущий месяц: {$currentDate->translatedFormat('F Y')}, пройдено дней: {$currentDay}");
-        $this->command->info("📈 Метод прогноза: Double Exponential Smoothing (15-23 месяца)");
+        $this->command->info("🏷️ Аномальные транзакции отмечены флагом is_anomaly = true");
+        $this->command->info("📈 Метод прогноза: LinearRegression (7-14 месяцев)");
     }
 }

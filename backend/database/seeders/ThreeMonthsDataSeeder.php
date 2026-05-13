@@ -10,20 +10,21 @@ use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Carbon\Carbon;
-
 class ThreeMonthsDataSeeder extends Seeder
 {
     public function run(): void
     {
-        $totalMonths = 3;
-        $label = '3 месяца';
+        // Генерируем 3 полных месяца (без текущего)
+        // Например: февраль, март, апрель
+        $completeMonths = 3;
+        $label = '3 полных месяца + текущий';
 
         // Получаем или создаем пользователя
         $user = User::first();
         if (!$user) {
             $user = User::create([
                 'name' => 'Test ' . $label . ' User',
-                'email' => 'test' . $totalMonths . 'months@test.com',
+                'email' => 'test_3months@test.com',
                 'password' => Hash::make('password'),
             ]);
         }
@@ -85,11 +86,14 @@ class ThreeMonthsDataSeeder extends Seeder
         $baseIncome = 2800;
         $transactionsCount = 0;
 
-        for ($monthOffset = $totalMonths - 1; $monthOffset >= 0; $monthOffset--) {
-            $monthDate = $now->copy()->subMonths($monthOffset);
+        // ========== 1. ГЕНЕРАЦИЯ 3 ПОЛНЫХ МЕСЯЦЕВ (без текущего) ==========
+        // Начинаем с месяца, который был 3 месяца назад
+        for ($i = $completeMonths; $i >= 1; $i--) {
+            $monthDate = $now->copy()->subMonths($i);
             $daysInMonth = $monthDate->daysInMonth;
             $monthName = $monthDate->translatedFormat('F Y');
             $monthNumber = $monthDate->month;
+            $year = $monthDate->year;
 
             // Сезонные коэффициенты
             $seasonalIncomeFactor = 1;
@@ -108,14 +112,14 @@ class ThreeMonthsDataSeeder extends Seeder
                 $seasonalIncomeFactor = 1.05;
             }
 
-            // Тренд роста за 3 месяца (~1.5% всего)
-            $trendFactor = 1 + ($totalMonths - 1 - $monthOffset) * 0.005;
+            // Тренд роста (чем дальше в прошлое, тем меньше доход)
+            $trendFactor = 1 + ($completeMonths - $i) * 0.01;
 
             // ========== ДОХОДЫ ==========
 
             // Зарплата
             $salary = round($baseIncome * $trendFactor * $seasonalIncomeFactor, 0);
-            $finalSalary = max(2600, round($salary * (1 + (rand(-20, 20) / 1000)), 2));
+            $finalSalary = max(2500, round($salary * (1 + (rand(-20, 20) / 1000)), 2));
 
             $transaction = Transaction::create([
                 'user_id' => $userId,
@@ -133,8 +137,8 @@ class ThreeMonthsDataSeeder extends Seeder
             $transactionsCount++;
 
             // Фриланс
-            if (rand(1, 100) <= 60) {
-                $freelanceAmount = round(rand(200, 550) * $trendFactor * $seasonalIncomeFactor, 2);
+            if (rand(1, 100) <= 65) {
+                $freelanceAmount = round(rand(200, 600) * $trendFactor * $seasonalIncomeFactor, 2);
                 $transaction = Transaction::create([
                     'user_id' => $userId,
                     'amount' => $freelanceAmount,
@@ -152,8 +156,8 @@ class ThreeMonthsDataSeeder extends Seeder
             }
 
             // Инвестиции
-            if (rand(1, 100) <= 35) {
-                $investmentAmount = round(rand(50, 250) * $trendFactor * $seasonalIncomeFactor, 2);
+            if (rand(1, 100) <= 40) {
+                $investmentAmount = round(rand(50, 300) * $trendFactor * $seasonalIncomeFactor, 2);
                 $transaction = Transaction::create([
                     'user_id' => $userId,
                     'amount' => $investmentAmount,
@@ -172,7 +176,7 @@ class ThreeMonthsDataSeeder extends Seeder
 
             // Подарки
             if ($monthNumber == 12 || $monthNumber == 4) {
-                $giftAmount = rand(100, 350);
+                $giftAmount = rand(100, 400);
                 $transaction = Transaction::create([
                     'user_id' => $userId,
                     'amount' => $giftAmount,
@@ -223,13 +227,13 @@ class ThreeMonthsDataSeeder extends Seeder
 
                 if ($categoryTotal <= 0) continue;
 
-                $transactionCount = rand(2, 6);
+                $transactionCount = rand(2, 7);
                 $remaining = $categoryTotal;
 
-                for ($i = 0; $i < $transactionCount; $i++) {
+                for ($j = 0; $j < $transactionCount; $j++) {
                     if ($remaining <= 0) break;
 
-                    $amount = ($i == $transactionCount - 1)
+                    $amount = ($j == $transactionCount - 1)
                         ? round($remaining, 2)
                         : round($remaining * rand(10, 30) / 100, 2);
 
@@ -250,6 +254,146 @@ class ThreeMonthsDataSeeder extends Seeder
                     ]);
                     $transactionsCount++;
                 }
+            }
+        }
+
+        // ========== 2. ГЕНЕРАЦИЯ ТРАНЗАКЦИЙ В ТЕКУЩЕМ МЕСЯЦЕ (ТОЛЬКО ПРОШЕДШИЕ ДНИ) ==========
+        $currentDate = Carbon::now();
+        $currentMonth = $currentDate->month;
+        $currentYear = $currentDate->year;
+        $currentDay = $currentDate->day;
+        $monthName = $currentDate->translatedFormat('F Y');
+
+        // Сезонные коэффициенты для текущего месяца
+        $seasonalIncomeFactor = 1;
+        $seasonalExpenseFactor = 1;
+
+        if ($currentMonth == 12) {
+            $seasonalIncomeFactor = 1.25;
+            $seasonalExpenseFactor = 1.35;
+        } elseif ($currentMonth == 1) {
+            $seasonalExpenseFactor = 1.20;
+        } elseif (in_array($currentMonth, [6, 7, 8])) {
+            $seasonalExpenseFactor = 1.25;
+        } elseif ($currentMonth == 9) {
+            $seasonalExpenseFactor = 1.15;
+        } elseif (in_array($currentMonth, [3, 4])) {
+            $seasonalIncomeFactor = 1.05;
+        }
+
+        // Тренд для текущего месяца (небольшой рост)
+        $trendFactor = 1 + $completeMonths * 0.01;
+
+        // ========== ДОХОДЫ В ТЕКУЩЕМ МЕСЯЦЕ (только если зарплата уже прошла) ==========
+        $salaryDay = rand(25, 28);
+        if ($salaryDay <= $currentDay) {
+            $salary = round($baseIncome * $trendFactor * $seasonalIncomeFactor, 0);
+            $finalSalary = max(2600, round($salary * (1 + (rand(-20, 20) / 1000)), 2));
+
+            $transaction = Transaction::create([
+                'user_id' => $userId,
+                'amount' => $finalSalary,
+                'currency_id' => $defaultCurrencyId,
+                'type' => 'income',
+                'description' => 'Зарплата за ' . $monthName,
+                'date' => $currentDate->copy()->day($salaryDay),
+                'payment_method' => 'transfer',
+            ]);
+            DB::table('category_transaction')->insert([
+                'category_id' => $categories['Зарплата']->id,
+                'transaction_id' => $transaction->id,
+            ]);
+            $transactionsCount++;
+        }
+
+        // Фриланс в текущем месяце (только если дата прошла)
+        if (rand(1, 100) <= 60) {
+            $freelanceDay = rand(10, 20);
+            if ($freelanceDay <= $currentDay) {
+                $freelanceAmount = round(rand(200, 550) * $trendFactor * $seasonalIncomeFactor, 2);
+                $transaction = Transaction::create([
+                    'user_id' => $userId,
+                    'amount' => $freelanceAmount,
+                    'currency_id' => $defaultCurrencyId,
+                    'type' => 'income',
+                    'description' => 'Проект фриланс',
+                    'date' => $currentDate->copy()->day($freelanceDay),
+                    'payment_method' => 'transfer',
+                ]);
+                DB::table('category_transaction')->insert([
+                    'category_id' => $categories['Фриланс']->id,
+                    'transaction_id' => $transaction->id,
+                ]);
+                $transactionsCount++;
+            }
+        }
+
+        // ========== РАСХОДЫ В ТЕКУЩЕМ МЕСЯЦЕ (ТОЛЬКО ПРОШЕДШИЕ ДНИ) ==========
+        $baseExpensePercent = rand(70, 82) / 100;
+        $avgMonthlyIncome = $baseIncome * $trendFactor;
+        $targetMonthlyExpense = round($avgMonthlyIncome * $baseExpensePercent * $seasonalExpenseFactor, 2);
+
+        // Пропорционально распределяем расходы на прошедшие дни
+        $daysInCurrentMonth = $currentDate->daysInMonth;
+        $targetExpenseForPassedDays = $targetMonthlyExpense * ($currentDay / $daysInCurrentMonth);
+
+        $expenseData = [
+            'Продукты' => ['min_percent' => 25, 'max_percent' => 35],
+            'Транспорт' => ['min_percent' => 8, 'max_percent' => 15],
+            'Развлечения' => ['min_percent' => 5, 'max_percent' => 12],
+            'Коммунальные услуги' => ['min_percent' => 12, 'max_percent' => 18],
+            'Одежда' => ['min_percent' => 5, 'max_percent' => 12],
+            'Здоровье' => ['min_percent' => 3, 'max_percent' => 8],
+            'Кафе и рестораны' => ['min_percent' => 4, 'max_percent' => 10],
+            'Образование' => ['min_percent' => 2, 'max_percent' => 6],
+        ];
+
+        $descriptions = [
+            'Продукты' => ['Покупка продуктов', 'Супермаркет', 'Продукты на неделю', 'Еда'],
+            'Транспорт' => ['Проездной', 'Такси', 'Бензин', 'Парковка'],
+            'Развлечения' => ['Кино', 'Ресторан', 'Кафе', 'Концерт'],
+            'Коммунальные услуги' => ['Комуналка', 'Электричество', 'Квартплата', 'Вода'],
+            'Одежда' => ['Одежда', 'Обувь', 'Аксессуары'],
+            'Здоровье' => ['Аптека', 'Врач', 'Спортзал', 'Витамины'],
+            'Кафе и рестораны' => ['Кафе', 'Ресторан', 'Обед', 'Ужин'],
+            'Образование' => ['Курсы', 'Учебники', 'Тренинг'],
+        ];
+
+        $paymentMethods = ['cash', 'card', 'transfer'];
+
+        foreach ($expenseData as $categoryName => $data) {
+            $percent = rand($data['min_percent'] * 10, $data['max_percent'] * 10) / 10;
+            $categoryTotal = round($targetExpenseForPassedDays * $percent / 100, 2);
+
+            if ($categoryTotal <= 0) continue;
+
+            $transactionCount = rand(1, 4);
+            $remaining = $categoryTotal;
+
+            for ($j = 0; $j < $transactionCount; $j++) {
+                if ($remaining <= 0) break;
+
+                $amount = ($j == $transactionCount - 1)
+                    ? round($remaining, 2)
+                    : round($remaining * rand(20, 50) / 100, 2);
+
+                $remaining -= $amount;
+
+                $day = rand(1, $currentDay);
+                $transaction = Transaction::create([
+                    'user_id' => $userId,
+                    'amount' => $amount,
+                    'currency_id' => $defaultCurrencyId,
+                    'type' => 'expense',
+                    'description' => $descriptions[$categoryName][array_rand($descriptions[$categoryName])],
+                    'date' => $currentDate->copy()->day($day),
+                    'payment_method' => $paymentMethods[array_rand($paymentMethods)],
+                ]);
+                DB::table('category_transaction')->insert([
+                    'category_id' => $categories[$categoryName]->id,
+                    'transaction_id' => $transaction->id,
+                ]);
+                $transactionsCount++;
             }
         }
     }
