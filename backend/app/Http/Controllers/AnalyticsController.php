@@ -104,12 +104,14 @@ class AnalyticsController extends Controller
             $validated = $request->validate([
                 'period' => 'nullable|in:month,year',
                 'year' => 'nullable|integer|min:2000|max:2100',
-                'month' => 'nullable|integer|min:1|max:12'
+                'month' => 'nullable|integer|min:1|max:12',
+                'include_anomalies' => 'nullable|boolean'
             ]);
 
             $period = $validated['period'] ?? 'month';
             $year = $validated['year'] ?? date('Y');
             $month = $validated['month'] ?? date('m');
+            $includeAnomalies = $request->boolean('include_anomalies', false);
 
             $startDate = null;
             $endDate = null;
@@ -125,42 +127,58 @@ class AnalyticsController extends Controller
                     break;
             }
 
-            $transactions = Transaction::where('user_id', $userId)
-                ->with(['categories', 'currency'])
+            // Доходы - всегда учитываем ВСЕ (аномалии в доходах - это реальные деньги)
+            $incomeTransactions = Transaction::where('user_id', $userId)
+                ->where('type', 'income')
                 ->whereBetween('date', [$startDate, $endDate])
+                ->with(['currency'])
                 ->get();
+
+            // Расходы - по умолчанию исключаем аномалии, можно включить параметром
+            $expenseQuery = Transaction::where('user_id', $userId)
+                ->where('type', 'expense')
+                ->whereBetween('date', [$startDate, $endDate])
+                ->with(['categories', 'currency']);
+
+            if (!$includeAnomalies) {
+                $expenseQuery->where('is_anomaly', false);
+            }
+
+            $expenseTransactions = $expenseQuery->get();
 
             $baseCurrency = Currency::where('code', 'BYN')->first();
             if (!$baseCurrency) {
                 return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
             }
 
-            $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
-
+            // Конвертируем доходы
+            $incomeRatesCache = $this->loadRatesForTransactions($incomeTransactions, $baseCurrency);
             $totalIncome = 0;
+            foreach ($incomeTransactions as $transaction) {
+                $totalIncome += $this->convertToBaseCurrency($transaction, $baseCurrency, $incomeRatesCache);
+            }
+
+            // Конвертируем расходы
+            $expenseRatesCache = $this->loadRatesForTransactions($expenseTransactions, $baseCurrency);
             $totalExpense = 0;
             $categoryTotals = [];
 
-            foreach ($transactions as $transaction) {
-                $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
+            foreach ($expenseTransactions as $transaction) {
+                $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $expenseRatesCache);
+                $totalExpense += $amountInBase;
 
-                if ($transaction->type === 'income') {
-                    $totalIncome += $amountInBase;
-                } else {
-                    $totalExpense += $amountInBase;
-                    foreach ($transaction->categories as $category) {
-                        $catId = $category->id;
-                        if (!isset($categoryTotals[$catId])) {
-                            $categoryTotals[$catId] = [
-                                'id' => $catId,
-                                'name' => $category->name,
-                                'color' => $category->color ?? '#3498db',
-                                'total' => 0,
-                                'budget_limit' => $category->budget_limit ?? 0
-                            ];
-                        }
-                        $categoryTotals[$catId]['total'] += $amountInBase;
+                foreach ($transaction->categories as $category) {
+                    $catId = $category->id;
+                    if (!isset($categoryTotals[$catId])) {
+                        $categoryTotals[$catId] = [
+                            'id' => $catId,
+                            'name' => $category->name,
+                            'color' => $category->color ?? '#3498db',
+                            'total' => 0,
+                            'budget_limit' => $category->budget_limit ?? 0
+                        ];
                     }
+                    $categoryTotals[$catId]['total'] += $amountInBase;
                 }
             }
 
@@ -191,7 +209,11 @@ class AnalyticsController extends Controller
 
             usort($categorySpending, fn($a, $b) => $b['total'] <=> $a['total']);
 
-            $financialHealth = $this->calculateFinancialHealth($userId, $endDate);
+            // Финансовое здоровье - считаем С учетом ВСЕХ доходов и ВСЕХ расходов (реальная картина)
+            $financialHealth = $this->calculateFinancialHealth($userId, $endDate, true);
+
+            // Статистика по исключенным аномалиям
+            $excludedAnomalies = $this->getExcludedAnomaliesStats($userId, $startDate, $endDate, $includeAnomalies);
 
             return response()->json([
                 'status' => 'success',
@@ -208,7 +230,8 @@ class AnalyticsController extends Controller
                         'label' => $startDate->translatedFormat('F Y')
                     ],
                     'category_spending' => $categorySpending,
-                    'financial_health' => $financialHealth
+                    'financial_health' => $financialHealth,
+                    'anomalies_info' => $excludedAnomalies
                 ]
             ]);
 
@@ -218,28 +241,71 @@ class AnalyticsController extends Controller
         }
     }
 
+    private function getExcludedAnomaliesStats(int $userId, Carbon $startDate, Carbon $endDate, bool $includeAnomalies): array
+    {
+        if ($includeAnomalies) {
+            return [
+                'excluded' => false,
+                'message' => 'В расчет включены все транзакции, включая разовые'
+            ];
+        }
+
+        $anomaliesCount = Transaction::where('user_id', $userId)
+            ->where('type', 'expense')
+            ->where('is_anomaly', true)
+            ->whereBetween('date', [$startDate, $endDate])
+            ->count();
+
+        $anomaliesAmount = Transaction::where('user_id', $userId)
+            ->where('type', 'expense')
+            ->where('is_anomaly', true)
+            ->whereBetween('date', [$startDate, $endDate])
+            ->sum('amount');
+
+        return [
+            'excluded' => true,
+            'count' => $anomaliesCount,
+            'total_amount' => round($anomaliesAmount, 2),
+            'message' => $anomaliesCount > 0
+                ? "{$anomaliesCount} разовых транзакций исключены из аналитики"
+                : null
+        ];
+    }
+
     // ==================== ФИНАНСОВОЕ ЗДОРОВЬЕ ====================
 
-    private function calculateFinancialHealth(int $userId, ?Carbon $currentDate = null): array
+    /**
+     * Расчет финансового здоровья
+     * @param bool $includeAnomalies - true: учитываем все расходы (реальная картина), false: исключаем аномалии (для прогнозов)
+     */
+    private function calculateFinancialHealth(int $userId, ?Carbon $currentDate = null, bool $includeAnomalies = true): array
     {
         try {
             $currentDate = $currentDate ?? Carbon::now();
             $salaryDay = $this->getUserSalaryDay($userId);
             $threeMonthsAgo = $currentDate->copy()->subMonths(3);
 
+            // Доходы - всегда учитываем ВСЕ (аномалии в доходах - это реальные деньги)
             $avgMonthlyIncome = Transaction::where('user_id', $userId)
                     ->where('type', 'income')
                     ->whereBetween('date', [$threeMonthsAgo, $currentDate])
                     ->sum('amount') / 3;
 
-            $avgMonthlyExpense = Transaction::where('user_id', $userId)
-                    ->where('type', 'expense')
-                    ->whereBetween('date', [$threeMonthsAgo, $currentDate])
-                    ->sum('amount') / 3;
+            // Расходы - учитываем или исключаем аномалии в зависимости от параметра
+            $expenseQuery = Transaction::where('user_id', $userId)
+                ->where('type', 'expense')
+                ->whereBetween('date', [$threeMonthsAgo, $currentDate]);
 
-            $savings = $this->getUserSavings($userId);
-            $monthlyLoanPayments = $this->getMonthlyLoanPayments($userId);
-            $cycleBalance = $this->getCurrentCycleBalance($userId, $currentDate, $salaryDay);
+            if (!$includeAnomalies) {
+                $expenseQuery->where('is_anomaly', false);
+            }
+
+            $avgMonthlyExpense = $expenseQuery->sum('amount') / 3;
+
+            // Сбережения
+            $savings = $this->getUserSavings($userId, $includeAnomalies);
+            $monthlyLoanPayments = $this->getMonthlyLoanPayments($userId, $includeAnomalies);
+            $cycleBalance = $this->getCurrentCycleBalance($userId, $currentDate, $salaryDay, $includeAnomalies);
             $daysUntilSalary = $this->getDaysUntilNextSalary($userId, $salaryDay, $currentDate);
 
             $dailyExpenseRate = $avgMonthlyExpense / 30;
@@ -295,7 +361,10 @@ class AnalyticsController extends Controller
                     'emergency_fund' => ['score' => round($emergencyFundScore), 'savings' => round($savings, 2), 'months_coverage' => $avgMonthlyExpense > 0 ? round($savings / $avgMonthlyExpense, 1) : 0],
                     'debt_load' => ['score' => round($debtLoadScore), 'monthly_payments' => round($monthlyLoanPayments, 2), 'percent_of_income' => $avgMonthlyIncome > 0 ? round(($monthlyLoanPayments / $avgMonthlyIncome) * 100) : 0],
                     'savings_rate' => ['score' => round($savingsRateScore), 'rate' => round($savingsRate, 1), 'saved_amount' => round($availableAfterExpenses, 2)]
-                ]
+                ],
+                'calculation_note' => $includeAnomalies
+                    ? 'Расчет с учетом всех транзакций (включая разовые)'
+                    : 'Расчет без учета разовых транзакций'
             ];
         } catch (\Exception $e) {
             Log::error('Financial health error: ' . $e->getMessage());
@@ -303,7 +372,7 @@ class AnalyticsController extends Controller
         }
     }
 
-    private function getCurrentCycleBalance(int $userId, Carbon $currentDate, int $salaryDay): float
+    private function getCurrentCycleBalance(int $userId, Carbon $currentDate, int $salaryDay, bool $includeAnomalies = true): float
     {
         $lastSalaryDate = Carbon::create($currentDate->year, $currentDate->month, $salaryDay);
         if ($lastSalaryDate > $currentDate) $lastSalaryDate->subMonth();
@@ -314,28 +383,55 @@ class AnalyticsController extends Controller
             ->where('date', '<=', $currentDate)
             ->sum('amount');
 
-        $expense = Transaction::where('user_id', $userId)
+        $expenseQuery = Transaction::where('user_id', $userId)
             ->where('type', 'expense')
             ->where('date', '>=', $lastSalaryDate)
-            ->where('date', '<=', $currentDate)
-            ->sum('amount');
+            ->where('date', '<=', $currentDate);
+
+        if (!$includeAnomalies) {
+            $expenseQuery->where('is_anomaly', false);
+        }
+
+        $expense = $expenseQuery->sum('amount');
 
         return $income - $expense;
     }
 
     private function getUserSalaryDay(int $userId): int {
+        // Исключаем аномалии
         $incomes = Transaction::where('user_id', $userId)
             ->where('type', 'income')
-            ->where('date', '>=', Carbon::now()->subMonths(6))
-            ->orderBy('amount', 'desc')
+            ->where('is_anomaly', false)
+            ->where('date', '>=', Carbon::now()->subMonths(3))
             ->get();
 
         if ($incomes->isEmpty()) return 25;
 
-        $avgIncome = $incomes->avg('amount');
-        $potentialSalaries = $incomes->filter(fn($t) => $t->amount >= $avgIncome * 0.7);
+        // Ищем повторяющиеся суммы (зарплата обычно повторяется)
+        $amountCount = [];
+        foreach ($incomes as $income) {
+            $roundedAmount = round($income->amount / 100) * 100;
+            $amountCount[$roundedAmount] = ($amountCount[$roundedAmount] ?? 0) + 1;
+        }
+
+        // Находим самую частую сумму
+        $maxCount = 0;
+        $mostFrequentAmount = 0;
+        foreach ($amountCount as $amount => $count) {
+            if ($count > $maxCount) {
+                $maxCount = $count;
+                $mostFrequentAmount = $amount;
+            }
+        }
+
+        // Берём доходы с этой суммой
+        $potentialSalaries = $incomes->filter(
+            fn($t) => round($t->amount / 100) * 100 == $mostFrequentAmount
+        );
+
         if ($potentialSalaries->isEmpty()) return 25;
 
+        // Считаем дни
         $dayCount = [];
         foreach ($potentialSalaries as $salary) {
             $day = Carbon::parse($salary->date)->day;
@@ -350,6 +446,7 @@ class AnalyticsController extends Controller
                 $salaryDay = $day;
             }
         }
+
         return $salaryDay;
     }
 
@@ -360,39 +457,52 @@ class AnalyticsController extends Controller
         return $currentDate->diffInDays($nextSalaryDate);
     }
 
-    private function getUserSavings(int $userId): float
+    private function getUserSavings(int $userId, bool $includeAnomalies = true): float
     {
         $totalIncome = Transaction::where('user_id', $userId)
             ->where('type', 'income')
             ->sum('amount');
 
-        $totalExpense = Transaction::where('user_id', $userId)
-            ->where('type', 'expense')
-            ->sum('amount');
+        $expenseQuery = Transaction::where('user_id', $userId)
+            ->where('type', 'expense');
+
+        if (!$includeAnomalies) {
+            $expenseQuery->where('is_anomaly', false);
+        }
+
+        $totalExpense = $expenseQuery->sum('amount');
 
         return max(0, $totalIncome - $totalExpense);
     }
 
-    private function getMonthlyLoanPayments(int $userId): float
+    private function getMonthlyLoanPayments(int $userId, bool $includeAnomalies = true): float
     {
         $loanCategory = Category::where('user_id', $userId)->where('name', 'Кредиты')->where('type', 'expense')->first();
         if ($loanCategory) {
             $threeMonthsAgo = Carbon::now()->subMonths(3);
-            $total = Transaction::where('user_id', $userId)
+
+            $query = Transaction::where('user_id', $userId)
                 ->whereHas('categories', fn($q) => $q->where('categories.id', $loanCategory->id))
-                ->whereBetween('date', [$threeMonthsAgo, Carbon::now()])
-                ->sum('amount');
+                ->whereBetween('date', [$threeMonthsAgo, Carbon::now()]);
+
+            if (!$includeAnomalies) {
+                $query->where('is_anomaly', false);
+            }
+
+            $total = $query->sum('amount');
             return $total / 3;
         }
         return 0;
     }
 
-    // ==================== МЕТОДЫ ДЛЯ ПРОГНОЗИРОВАНИЯ ====================
+    // ==================== МЕТОДЫ ДЛЯ ПРОГНОЗИРОВАНИЯ (всегда исключаем аномалии) ====================
 
     private function getMonthlyExpenseAmount(int $userId, int $year, int $month): float
     {
+        // Для ПРОГНОЗОВ - всегда исключаем аномалии
         $transactions = Transaction::where('user_id', $userId)
             ->where('type', 'expense')
+            ->where('is_anomaly', false)
             ->with(['currency'])
             ->whereYear('date', $year)
             ->whereMonth('date', $month)
@@ -410,8 +520,10 @@ class AnalyticsController extends Controller
 
     private function getCategoryMonthlyExpense(int $userId, int $categoryId, int $year, int $month): float
     {
+        // Для ПРОГНОЗОВ - всегда исключаем аномалии
         $transactions = Transaction::where('user_id', $userId)
             ->where('type', 'expense')
+            ->where('is_anomaly', false)
             ->whereHas('categories', fn($q) => $q->where('categories.id', $categoryId))
             ->with(['currency'])
             ->whereYear('date', $year)
@@ -866,7 +978,7 @@ class AnalyticsController extends Controller
 
         if ($n < 3) return null;
         if ($n < 7) return $this->simpleExtrapolation($data, $forecastSteps);
-        if ($n < 12) return $this->linearRegression($data, $forecastSteps);
+        if ($n < 15) return $this->linearRegression($data, $forecastSteps);
         if ($n < 24) return $this->doubleExponentialSmoothingImproved($data, $forecastSteps);
         return $this->holtWinters($data, 12, $forecastSteps);
     }
@@ -878,19 +990,22 @@ class AnalyticsController extends Controller
         try {
             $userId = $this->getUserId();
 
-            $hasTransactions = Transaction::where('user_id', $userId)->exists();
+            // Проверяем наличие обычных транзакций (не аномальных)
+            $hasRegularTransactions = Transaction::where('user_id', $userId)
+                ->where('is_anomaly', false)
+                ->exists();
 
-            if (!$hasTransactions) {
+            if (!$hasRegularTransactions) {
                 return response()->json([
                     'status' => 'success',
                     'data' => [
                         'has_data' => false,
-                        'message' => 'Нет данных для прогноза. Добавьте транзакции.'
+                        'message' => 'Нет данных для прогноза. Добавьте транзакции или отметьте существующие как обычные.'
                     ]
                 ]);
             }
 
-            $completeMonthsData = $this->getCompleteMonthsExpensesArray($userId, 30);
+            $completeMonthsData = $this->getCompleteMonthsExpensesArray($userId, 24);
             $monthsCount = count($completeMonthsData);
 
             if ($monthsCount < 3) {
@@ -899,7 +1014,7 @@ class AnalyticsController extends Controller
                     'data' => [
                         'has_data' => true,
                         'forecast_available' => false,
-                        'message' => 'Недостаточно полных месяцев данных. Накопите минимум 3 месяца истории.',
+                        'message' => 'Недостаточно полных месяцев данных. Накопите минимум 3 месяца истории (аномальные транзакции исключены).',
                         'complete_months_available' => $monthsCount
                     ]
                 ]);
@@ -938,6 +1053,7 @@ class AnalyticsController extends Controller
 
             $confidence = $this->calculateConfidence($userId);
             $modelMetrics = $this->calculateModelMetrics($completeMonthsData, $monthlyForecast);
+            $excludedAnomalies = $this->getExcludedAnomaliesInfo($userId);
 
             return response()->json([
                 'status' => 'success',
@@ -953,6 +1069,7 @@ class AnalyticsController extends Controller
                     'next_month' => $nextMonthSummary,
                     'second_month' => $secondMonthSummary,
                     'category_forecasts' => $categoryForecasts,
+                    'excluded_anomalies' => $excludedAnomalies,
                     'trend_factor' => round($trend, 3),
                     'seasonal_factor' => round($seasonalFactor, 2),
                     'model_metrics' => $modelMetrics,
@@ -966,12 +1083,41 @@ class AnalyticsController extends Controller
         }
     }
 
+    private function getExcludedAnomaliesInfo(int $userId): array
+    {
+        $totalAnomalies = Transaction::where('user_id', $userId)
+            ->where('is_anomaly', true)
+            ->where('type', 'expense')
+            ->count();
+
+        $recentAnomalies = Transaction::where('user_id', $userId)
+            ->where('is_anomaly', true)
+            ->where('type', 'expense')
+            ->where('date', '>=', Carbon::now()->subMonths(3))
+            ->count();
+
+        $anomaliesAmount = Transaction::where('user_id', $userId)
+            ->where('is_anomaly', true)
+            ->where('type', 'expense')
+            ->sum('amount');
+
+        return [
+            'total_count' => $totalAnomalies,
+            'recent_3_months_count' => $recentAnomalies,
+            'total_amount' => round($anomaliesAmount, 2),
+            'excluded_from_forecast' => true,
+            'message' => $totalAnomalies > 0
+                ? "{$totalAnomalies} разовых транзакций исключены из прогноза"
+                : null
+        ];
+    }
+
     // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ ОТВЕТА ====================
 
     private function getReliabilityMessage(int $monthsCount): string
     {
         if ($monthsCount < 7) return '⚠️ Прогноз на основе минимальных данных (3-6 месяцев). Рекомендуется накопить больше истории.';
-        if ($monthsCount < 12) return '📊 Прогноз имеет хорошую точность. Для улучшения рекомендуется накопить 12+ месяцев данных.';
+        if ($monthsCount < 15) return '📊 Прогноз имеет хорошую точность. Для улучшения рекомендуется накопить 15+ месяцев данных.';
         if ($monthsCount < 24) return '✅ Прогноз имеет высокую точность.';
         return '✅ Прогноз имеет высокую точность с учетом сезонности.';
     }
@@ -979,7 +1125,7 @@ class AnalyticsController extends Controller
     private function getMethodName(int $monthsCount): string
     {
         if ($monthsCount < 7) return 'SimpleExtrapolation';
-        if ($monthsCount < 12) return 'LinearRegression';
+        if ($monthsCount < 15) return 'LinearRegression';
         if ($monthsCount < 24) return 'DoubleExponentialSmoothing';
         return 'HoltWinters';
     }
@@ -993,6 +1139,7 @@ class AnalyticsController extends Controller
 
         $transactions = Transaction::where('user_id', $userId)
             ->where('type', 'expense')
+            ->where('is_anomaly', false)
             ->whereBetween('date', [$startDate, $endDate])
             ->get();
 
@@ -1173,6 +1320,7 @@ class AnalyticsController extends Controller
     private function calculateConfidence(int $userId): array
     {
         $oldest = Transaction::where('user_id', $userId)
+            ->where('is_anomaly', false)
             ->orderBy('date', 'asc')
             ->first();
 
