@@ -6,6 +6,9 @@ use App\Models\Transaction;
 use App\Models\Category;
 use App\Models\Currency;
 use App\Models\CurrencyRate;
+use App\Services\Analytics\AnomalyService;
+use App\Services\Analytics\ForecastService;
+use App\Services\Analytics\ForecastResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
@@ -14,82 +17,20 @@ use Illuminate\Support\Facades\Log;
 
 class AnalyticsController extends Controller
 {
-    // ==================== БАЗОВЫЕ МЕТОДЫ ====================
+    protected AnomalyService $anomalyService;
+    protected ForecastService $forecastService;
+
+    public function __construct()
+    {
+        $this->anomalyService = new AnomalyService();
+        $this->forecastService = new ForecastService(new ForecastResolver());
+    }
 
     protected function getUserId()
     {
         $userId = Auth::id();
         if (!$userId) abort(401, 'Unauthorized');
         return $userId;
-    }
-
-    public function monthlyTrends(Request $request): \Illuminate\Http\JsonResponse
-    {
-        try {
-            $userId = $this->getUserId();
-            $months = (int) $request->input('months', 12);
-
-            $baseCurrency = Currency::where('code', 'BYN')->first();
-            if (!$baseCurrency) {
-                return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
-            }
-
-            $startDate = Carbon::now()->subMonths($months - 1)->startOfMonth();
-
-            $transactions = Transaction::where('user_id', $userId)
-                ->with(['currency'])
-                ->where('date', '>=', $startDate)
-                ->get();
-
-            $grouped = $transactions->groupBy(fn($t) => $t->date->format('Y-m'));
-
-            $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
-
-            $trends = [];
-            $currentDate = Carbon::now();
-
-            for ($i = $months - 1; $i >= 0; $i--) {
-                $date = $currentDate->copy()->subMonths($i);
-                $monthKey = $date->format('Y-m');
-
-                $monthTransactions = $grouped[$monthKey] ?? collect();
-
-                $income = 0;
-                $expense = 0;
-
-                foreach ($monthTransactions as $transaction) {
-                    $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
-
-                    if ($transaction->type === 'income') {
-                        $income += $amountInBase;
-                    } else {
-                        $expense += $amountInBase;
-                    }
-                }
-
-                $trends[] = [
-                    'month' => $monthKey,
-                    'month_label' => $date->translatedFormat('F Y'),
-                    'income' => round($income, 2),
-                    'expense' => round($expense, 2),
-                    'balance' => round($income - $expense, 2),
-                    'savings_rate' => $income > 0 ? round((($income - $expense) / $income) * 100, 1) : 0
-                ];
-            }
-
-            return response()->json([
-                'status' => 'success',
-                'data' => [
-                    'trends' => $trends,
-                    'base_currency' => $baseCurrency->code,
-                    'period_months' => $months
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('MonthlyTrends error: ' . $e->getMessage());
-            return response()->json(['status' => 'error', 'message' => 'Ошибка: ' . $e->getMessage()], 500);
-        }
     }
 
     // ==================== КОНВЕРТАЦИЯ ВАЛЮТ ====================
@@ -439,362 +380,6 @@ class AnalyticsController extends Controller
         }
 
         return $result;
-    }
-
-    private function getForecastConfig(int $monthsCount): array
-    {
-        if ($monthsCount < 7) {
-            return [
-                'model' => 'SimpleExtrapolation',
-                'message' => '⚠️ Прогноз на основе минимальных данных (3-6 месяцев). Рекомендуется накопить больше истории.',
-                'method' => 'simpleExtrapolation'
-            ];
-        }
-        if ($monthsCount < 15) {
-            return [
-                'model' => 'LinearRegression',
-                'message' => '📊 Прогноз имеет хорошую точность. Для улучшения рекомендуется накопить 15+ месяцев данных.',
-                'method' => 'linearRegression'
-            ];
-        }
-        if ($monthsCount < 24) {
-            return [
-                'model' => 'DoubleExponentialSmoothing',
-                'message' => '✅ Прогноз имеет высокую точность.',
-                'method' => 'doubleExponentialSmoothingImproved'
-            ];
-        }
-        return [
-            'model' => 'HoltWinters',
-            'message' => '✅ Прогноз имеет высокую точность с учетом сезонности.',
-            'method' => 'holtWinters'
-        ];
-    }
-
-    private function simpleExtrapolation(array $data, int $steps): array
-    {
-        $n = count($data);
-        if ($n < 2) {
-            $lastValue = $data[$n - 1] ?? 0;
-            return array_fill(0, $steps, $lastValue);
-        }
-
-        $lastValue = $data[$n - 1];
-        $firstValue = $data[0];
-        $avgChange = ($lastValue - $firstValue) / ($n - 1);
-
-        $maxDecline = $lastValue * 0.15;
-        $maxGrowth = $lastValue * 0.20;
-        $avgChange = max(-$maxDecline, min($maxGrowth, $avgChange));
-
-        $forecast = [];
-        for ($i = 1; $i <= $steps; $i++) {
-            $value = $lastValue + $avgChange * $i;
-            $value = max($lastValue * 0.3, $value);
-            $forecast[] = round($value, 2);
-        }
-        return $forecast;
-    }
-
-    private function linearRegression(array $data, int $steps): array
-    {
-        $n = count($data);
-        if ($n < 2) return $this->simpleExtrapolation($data, $steps);
-
-        $x = range(0, $n - 1);
-        $y = $data;
-
-        $sumX = array_sum($x);
-        $sumY = array_sum($y);
-        $sumXY = array_sum(array_map(fn($xi, $yi) => $xi * $yi, $x, $y));
-        $sumX2 = array_sum(array_map(fn($xi) => $xi * $xi, $x));
-
-        $denominator = ($n * $sumX2 - $sumX * $sumX);
-        if ($denominator == 0) return $this->simpleExtrapolation($data, $steps);
-
-        $slope = ($n * $sumXY - $sumX * $sumY) / $denominator;
-        $intercept = ($sumY - $slope * $sumX) / $n;
-
-        $forecast = [];
-        $lastValue = $data[$n - 1];
-        for ($k = 1; $k <= $steps; $k++) {
-            $nextX = $n - 1 + $k;
-            $value = $slope * $nextX + $intercept;
-            $value = max($lastValue * 0.3, min($lastValue * 2.0, $value));
-            $forecast[] = round(max(0, $value), 2);
-        }
-        return $forecast;
-    }
-
-    private function doubleExponentialSmoothingImproved(array $data, int $forecastSteps): array
-    {
-        $n = count($data);
-        if ($n < 4) return $this->linearRegression($data, $forecastSteps);
-
-        list($alpha, $beta) = $this->optimizeHoltParametersAdvanced($data);
-        list($level, $trend) = $this->initHoltWintersWithLinearRegression($data);
-
-        for ($t = 1; $t < $n; $t++) {
-            $oldLevel = $level;
-            $level = $alpha * $data[$t] + (1 - $alpha) * ($level + $trend);
-            $trend = $beta * ($level - $oldLevel) + (1 - $beta) * $trend;
-        }
-
-        $forecast = [];
-        for ($k = 1; $k <= $forecastSteps; $k++) {
-            $forecast[] = max(0, $level + $k * $trend);
-        }
-
-        $lastValue = $data[$n - 1];
-        $forecast = $this->constrainForecast($forecast, $lastValue);
-        return $this->smoothForecast($forecast);
-    }
-
-    private function holtWinters(array $data, int $seasonalPeriod, int $forecastSteps): array
-    {
-        $n = count($data);
-        if ($n < $seasonalPeriod * 2) return $this->doubleExponentialSmoothingImproved($data, $forecastSteps);
-
-        list($alpha, $beta, $gamma) = $this->optimizeHoltWintersParameters($data);
-        list($level, $trend, $seasonality) = $this->initHoltWintersWithParams($data, $seasonalPeriod, $alpha, $beta, $gamma);
-
-        for ($t = 0; $t < $n; $t++) {
-            $oldLevel = $level;
-            $level = $alpha * $data[$t] + (1 - $alpha) * ($level + $trend);
-            $trend = $beta * ($level - $oldLevel) + (1 - $beta) * $trend;
-            $seasonIndex = $t % $seasonalPeriod;
-            $seasonality[$seasonIndex] = $gamma * ($data[$t] / $level) + (1 - $gamma) * $seasonality[$seasonIndex];
-        }
-
-        $forecast = [];
-        for ($k = 1; $k <= $forecastSteps; $k++) {
-            $seasonIndex = ($n + $k - 1) % $seasonalPeriod;
-            $forecast[] = ($level + $k * $trend) * $seasonality[$seasonIndex];
-        }
-        return $forecast;
-    }
-
-    private function optimizeHoltParametersAdvanced(array $data): array
-    {
-        $n = count($data);
-
-        if ($n < 18) {
-            $alphaRange = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
-            $betaRange = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5];
-        } elseif ($n < 22) {
-            $alphaRange = [0.2, 0.3, 0.4, 0.5, 0.6];
-            $betaRange = [0.05, 0.1, 0.2, 0.3];
-        } else {
-            $alphaRange = [0.1, 0.2, 0.3, 0.4, 0.5];
-            $betaRange = [0.05, 0.1, 0.15, 0.2, 0.25];
-        }
-
-        $bestAlpha = 0.3;
-        $bestBeta = 0.2;
-        $bestError = INF;
-
-        foreach ($alphaRange as $alpha) {
-            foreach ($betaRange as $beta) {
-                $error = $this->calculateCombinedError($data, $alpha, $beta);
-                if ($error < $bestError) {
-                    $bestError = $error;
-                    $bestAlpha = $alpha;
-                    $bestBeta = $beta;
-                }
-            }
-        }
-        return [$bestAlpha, $bestBeta];
-    }
-
-    private function calculateCombinedError(array $data, float $alpha, float $beta): float
-    {
-        $n = count($data);
-        if ($n < 4) return INF;
-
-        $level = $data[0];
-        $trend = $data[1] - $data[0];
-        $mapeSum = 0;
-        $rmseSum = 0;
-        $validCount = 0;
-
-        for ($t = 1; $t < $n; $t++) {
-            $oldLevel = $level;
-            $predicted = $level + $trend;
-
-            if ($t > $n * 0.7 && $data[$t] > 0) {
-                $mapeSum += abs(($data[$t] - $predicted) / $data[$t]);
-                $rmseSum += pow($data[$t] - $predicted, 2);
-                $validCount++;
-            }
-
-            $level = $alpha * $data[$t] + (1 - $alpha) * ($level + $trend);
-            $trend = $beta * ($level - $oldLevel) + (1 - $beta) * $trend;
-        }
-
-        if ($validCount == 0) return INF;
-
-        $mape = ($mapeSum / $validCount) * 100;
-        $rmse = sqrt($rmseSum / $validCount);
-        $mean = array_sum($data) / $n;
-        $normalizedRmse = $rmse / $mean;
-
-        return ($mape * 0.7) + ($normalizedRmse * 100 * 0.3);
-    }
-
-    private function initHoltWintersWithLinearRegression(array $data): array
-    {
-        $n = count($data);
-        $x = range(0, $n - 1);
-        $sumX = array_sum($x);
-        $sumY = array_sum($data);
-        $sumXY = array_sum(array_map(fn($xi, $yi) => $xi * $yi, $x, $data));
-        $sumX2 = array_sum(array_map(fn($xi) => $xi * $xi, $x));
-
-        $denominator = ($n * $sumX2 - $sumX * $sumX);
-        if ($denominator != 0) {
-            $trend = ($n * $sumXY - $sumX * $sumY) / $denominator;
-        } else {
-            $trend = 0;
-        }
-
-        $level = $data[$n - 1] - $trend * ($n - 1);
-        $level = max($data[$n - 1] * 0.5, min($data[$n - 1] * 1.5, $level));
-        return [$level, $trend];
-    }
-
-    private function optimizeHoltWintersParameters(array $data): array
-    {
-        $bestAlpha = 0.3;
-        $bestBeta = 0.2;
-        $bestGamma = 0.3;
-        $bestMAPE = INF;
-
-        for ($alpha = 0.1; $alpha <= 0.9; $alpha += 0.1) {
-            for ($beta = 0.05; $beta <= 0.5; $beta += 0.05) {
-                for ($gamma = 0.1; $gamma <= 0.9; $gamma += 0.1) {
-                    $mape = $this->calculateMAPE($data, $alpha, $beta, $gamma);
-                    if ($mape < $bestMAPE) {
-                        $bestMAPE = $mape;
-                        $bestAlpha = $alpha;
-                        $bestBeta = $beta;
-                        $bestGamma = $gamma;
-                    }
-                }
-            }
-        }
-        return [$bestAlpha, $bestBeta, $bestGamma];
-    }
-
-    private function calculateMAPE(array $data, float $alpha, float $beta, float $gamma): float
-    {
-        $n = count($data);
-        if ($n < 12) return INF;
-
-        $seasonalPeriod = 12;
-        list($level, $trend, $seasonality) = $this->initHoltWintersWithParams($data, $seasonalPeriod, $alpha, $beta, $gamma);
-
-        $errors = [];
-        $validCount = 0;
-
-        for ($t = 0; $t < $n; $t++) {
-            $oldLevel = $level;
-            $level = $alpha * $data[$t] + (1 - $alpha) * ($level + $trend);
-            $trend = $beta * ($level - $oldLevel) + (1 - $beta) * $trend;
-            $seasonIndex = $t % $seasonalPeriod;
-
-            if ($t > $n * 0.7) {
-                $predicted = ($oldLevel + $trend) * $seasonality[$seasonIndex];
-                if ($data[$t] > 0) {
-                    $errors[] = abs(($data[$t] - $predicted) / $data[$t]);
-                    $validCount++;
-                }
-            }
-
-            $seasonality[$seasonIndex] = $gamma * ($data[$t] / $level) + (1 - $gamma) * $seasonality[$seasonIndex];
-        }
-        return $validCount > 0 ? (array_sum($errors) / $validCount) * 100 : INF;
-    }
-
-    private function initHoltWintersWithParams(array $data, int $seasonalPeriod, float $alpha, float $beta, float $gamma): array
-    {
-        $n = count($data);
-
-        $firstSeason = array_slice($data, 0, $seasonalPeriod);
-        $level = array_sum($firstSeason) / $seasonalPeriod;
-
-        $trend = 0;
-        $seasons = floor($n / $seasonalPeriod);
-        for ($s = 0; $s < $seasons - 1; $s++) {
-            $seasonStart = $s * $seasonalPeriod;
-            $seasonEnd = $seasonStart + $seasonalPeriod;
-            $seasonAvg = array_sum(array_slice($data, $seasonStart, $seasonalPeriod)) / $seasonalPeriod;
-            $nextSeasonAvg = array_sum(array_slice($data, $seasonEnd, $seasonalPeriod)) / $seasonalPeriod;
-            $trend += ($nextSeasonAvg - $seasonAvg) / $seasonalPeriod;
-        }
-        $trend = $trend / max(1, $seasons - 1);
-
-        $seasonality = [];
-        for ($i = 0; $i < $seasonalPeriod; $i++) {
-            $seasonalSum = 0;
-            $seasonCount = 0;
-            for ($j = $i; $j < $n; $j += $seasonalPeriod) {
-                if ($j < $n) {
-                    $seasonalSum += $data[$j] / $level;
-                    $seasonCount++;
-                }
-            }
-            $seasonality[] = $seasonCount > 0 ? $seasonalSum / $seasonCount : 1.0;
-        }
-
-        $seasonalityMean = array_sum($seasonality) / $seasonalPeriod;
-        if ($seasonalityMean > 0) {
-            $seasonality = array_map(fn($s) => $s / $seasonalityMean, $seasonality);
-        }
-        return [$level, $trend, $seasonality];
-    }
-
-    private function constrainForecast(array $forecast, float $lastValue): array
-    {
-        $minValue = $lastValue * 0.3;
-        $maxValue = $lastValue * 2.0;
-        return array_map(fn($v) => max($minValue, min($maxValue, $v)), $forecast);
-    }
-
-    private function smoothForecast(array $forecast): array
-    {
-        $smoothed = [];
-        $window = 3;
-        $count = count($forecast);
-
-        for ($i = 0; $i < $count; $i++) {
-            $sum = 0;
-            $windowCount = 0;
-            for ($j = -$window; $j <= $window; $j++) {
-                $idx = $i + $j;
-                if ($idx >= 0 && $idx < $count) {
-                    $sum += $forecast[$idx];
-                    $windowCount++;
-                }
-            }
-            $smoothed[] = $sum / $windowCount;
-        }
-        return $smoothed;
-    }
-
-    private function selectForecastMethod(array $data, int $forecastSteps = 3): ?array
-    {
-        $n = count($data);
-        if ($n < 3) return null;
-
-        $config = $this->getForecastConfig($n);
-
-        return match($config['method']) {
-            'simpleExtrapolation' => $this->simpleExtrapolation($data, $forecastSteps),
-            'linearRegression' => $this->linearRegression($data, $forecastSteps),
-            'doubleExponentialSmoothingImproved' => $this->doubleExponentialSmoothingImproved($data, $forecastSteps),
-            'holtWinters' => $this->holtWinters($data, 12, $forecastSteps),
-            default => null
-        };
     }
 
     private function forecastRemainingCurrentMonth(int $userId): array
@@ -1208,11 +793,13 @@ class AnalyticsController extends Controller
         try {
             $userId = $this->getUserId();
 
-            $hasRegularTransactions = Transaction::where('user_id', $userId)
-                ->where('is_anomaly', false)
-                ->exists();
+            // ========== 1. ПОЛУЧАЕМ ВСЕ ТРАНЗАКЦИИ ==========
+            $allTransactions = Transaction::where('user_id', $userId)
+                ->where('type', 'expense')
+                ->with(['categories', 'currency'])
+                ->get();
 
-            if (!$hasRegularTransactions) {
+            if ($allTransactions->isEmpty()) {
                 return response()->json([
                     'status' => 'success',
                     'data' => [
@@ -1222,8 +809,51 @@ class AnalyticsController extends Controller
                 ]);
             }
 
-            $completeMonthsData = $this->getCompleteMonthsExpensesArray($userId, 30);
-            $monthsCount = count($completeMonthsData);
+            // ========== 2. ОБНАРУЖЕНИЕ И ИСКЛЮЧЕНИЕ АНОМАЛИЙ ==========
+            $anomalies = $this->anomalyService->detectAnomalies($allTransactions);
+            $cleanTransactions = $this->anomalyService->getCleanTransactions($allTransactions);
+            $anomaliesStats = $this->anomalyService->getAnomaliesStats($allTransactions);
+
+            // ========== 3. ПРОВЕРЯЕМ, ОСТАЛИСЬ ЛИ ТРАНЗАКЦИИ ПОСЛЕ ОЧИСТКИ ==========
+            if ($cleanTransactions->isEmpty()) {
+                return response()->json([
+                    'status' => 'success',
+                    'data' => [
+                        'has_data' => false,
+                        'message' => 'После исключения аномальных транзакций не осталось данных для прогноза.'
+                    ]
+                ]);
+            }
+
+            // ========== 4. ФОРМИРУЕМ МАССИВ ПОМЕСЯЧНЫХ РАСХОДОВ (УЖЕ БЕЗ АНОМАЛИЙ) ==========
+            $cleanTransactionsByMonth = $cleanTransactions->groupBy(fn($t) => $t->date->format('Y-m'));
+
+            $baseCurrency = Currency::where('code', 'BYN')->first();
+            if (!$baseCurrency) {
+                return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
+            }
+
+            $ratesCache = $this->loadRatesForTransactions($cleanTransactions, $baseCurrency);
+
+            $monthlyExpenses = [];
+            $now = Carbon::now();
+
+            for ($i = 29; $i >= 0; $i--) {
+                $date = $now->copy()->subMonths($i);
+                $monthKey = $date->format('Y-m');
+                $monthTransactions = $cleanTransactionsByMonth[$monthKey] ?? collect();
+
+                $total = 0;
+                foreach ($monthTransactions as $transaction) {
+                    $total += $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
+                }
+
+                if ($total > 0) {
+                    $monthlyExpenses[] = $total;
+                }
+            }
+
+            $monthsCount = count($monthlyExpenses);
 
             if ($monthsCount < 3) {
                 return response()->json([
@@ -1231,14 +861,18 @@ class AnalyticsController extends Controller
                     'data' => [
                         'has_data' => true,
                         'forecast_available' => false,
-                        'message' => 'Недостаточно полных месяцев данных. Накопите минимум 3 месяца истории.',
-                        'complete_months_available' => $monthsCount
+                        'message' => 'Недостаточно полных месяцев данных после исключения аномалий. Накопите больше истории.',
+                        'complete_months_available' => $monthsCount,
+                        'anomalies_removed' => $anomaliesStats
                     ]
                 ]);
             }
 
-            $monthlyForecast = $this->selectForecastMethod($completeMonthsData, 3);
-            if ($monthlyForecast === null) {
+            // ========== 5. ВЫПОЛНЯЕМ ПРОГНОЗ ==========
+            $monthlyForecast = $this->forecastService->forecast($monthlyExpenses, 3);
+            $strategy = $this->forecastService->getStrategy($monthsCount);
+
+            if ($monthlyForecast === null || $strategy === null) {
                 return response()->json([
                     'status' => 'success',
                     'data' => [
@@ -1249,9 +883,10 @@ class AnalyticsController extends Controller
                 ]);
             }
 
+            // ========== 6. ФОРМИРУЕМ ОСТАЛЬНЫЕ ДАННЫЕ ==========
             $remainingMonth = $this->forecastRemainingCurrentMonth($userId);
             $nextMonthDate = Carbon::now()->addMonth()->startOfMonth();
-            $lastCompleteMonthTotal = end($completeMonthsData);
+            $lastCompleteMonthTotal = end($monthlyExpenses);
             $nextMonthSummary = $this->forecastFullMonthSummary($monthlyForecast[0], $nextMonthDate, $lastCompleteMonthTotal);
             $secondMonthSummary = $this->forecastFullMonthSummary(
                 $monthlyForecast[1] ?? $monthlyForecast[0],
@@ -1263,16 +898,17 @@ class AnalyticsController extends Controller
             $baselineTotal = $this->getMonthlyExpenseAmount($userId, $lastCompleteMonth->year, $lastCompleteMonth->month);
             $dailyBaseline = $baselineTotal / $lastCompleteMonth->daysInMonth;
 
-            $trend = $this->calculateTrendFromData($completeMonthsData);
-            $seasonalFactor = $this->calculateSeasonalFactor($userId, $completeMonthsData);
-            $forecastConfig = $this->getForecastConfig($monthsCount);
+            $trend = $this->calculateTrendFromData($monthlyExpenses);
+            $seasonalFactor = $this->calculateSeasonalFactor($userId, $monthlyExpenses);
 
             return response()->json([
                 'status' => 'success',
                 'data' => [
                     'has_data' => true,
                     'forecast_available' => true,
-                    'model' => $forecastConfig['model'],
+                    'detector' => $this->anomalyService->getDetectorName(),
+                    'anomalies_removed' => $anomaliesStats,
+                    'model' => $strategy->getName(),
                     'confidence' => ($conf = $this->calculateConfidence($userId))['percent'],
                     'confidence_level' => $conf['level'],
                     'confidence_text' => $conf['text'],
@@ -1284,8 +920,8 @@ class AnalyticsController extends Controller
                     'excluded_anomalies' => $this->getAnomaliesStats($userId, null, null, true),
                     'trend_factor' => round($trend, 3),
                     'seasonal_factor' => round($seasonalFactor, 2),
-                    'model_metrics' => $this->calculateModelMetrics($completeMonthsData, $monthlyForecast),
-                    'reliability_message' => $forecastConfig['message']
+                    'model_metrics' => $this->calculateModelMetrics($monthlyExpenses, $monthlyForecast),
+                    'reliability_message' => $strategy->getReliabilityMessage()
                 ]
             ]);
 
