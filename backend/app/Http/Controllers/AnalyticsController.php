@@ -33,6 +33,74 @@ class AnalyticsController extends Controller
         return $userId;
     }
 
+    public function monthlyTrends(Request $request): \Illuminate\Http\JsonResponse
+    {
+        try {
+            $userId = $this->getUserId();
+            $months = (int) $request->input('months', 12);
+
+            $baseCurrency = Currency::where('code', 'BYN')->first();
+            if (!$baseCurrency) {
+                return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
+            }
+
+            $startDate = Carbon::now()->subMonths($months - 1)->startOfMonth();
+
+            $transactions = Transaction::where('user_id', $userId)
+                ->with(['currency'])
+                ->where('date', '>=', $startDate)
+                ->get();
+
+            $grouped = $transactions->groupBy(fn($t) => $t->date->format('Y-m'));
+
+            $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
+
+            $trends = [];
+            $currentDate = Carbon::now();
+
+            for ($i = $months - 1; $i >= 0; $i--) {
+                $date = $currentDate->copy()->subMonths($i);
+                $monthKey = $date->format('Y-m');
+
+                $monthTransactions = $grouped[$monthKey] ?? collect();
+
+                $income = 0;
+                $expense = 0;
+
+                foreach ($monthTransactions as $transaction) {
+                    $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
+
+                    if ($transaction->type === 'income') {
+                        $income += $amountInBase;
+                    } else {
+                        $expense += $amountInBase;
+                    }
+                }
+
+                $trends[] = [
+                    'month' => $monthKey,
+                    'month_label' => $date->translatedFormat('F Y'),
+                    'income' => round($income, 2),
+                    'expense' => round($expense, 2),
+                    'balance' => round($income - $expense, 2),
+                    'savings_rate' => $income > 0 ? round((($income - $expense) / $income) * 100, 1) : 0
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'trends' => $trends,
+                    'base_currency' => $baseCurrency->code,
+                    'period_months' => $months
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('MonthlyTrends error: ' . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => 'Ошибка: ' . $e->getMessage()], 500);
+        }
+    }
     // ==================== КОНВЕРТАЦИЯ ВАЛЮТ ====================
 
     private function loadRatesForTransactions(Collection $transactions, Currency $baseCurrency): array
@@ -671,7 +739,6 @@ class AnalyticsController extends Controller
             $period = $validated['period'] ?? 'month';
             $year = $validated['year'] ?? date('Y');
             $month = $validated['month'] ?? date('m');
-            $includeAnomalies = $request->boolean('include_anomalies', false);
 
             $startDate = $period === 'year'
                 ? Carbon::create($year, 1, 1)->startOfYear()
@@ -681,37 +748,33 @@ class AnalyticsController extends Controller
                 ? Carbon::create($year, 12, 31)->endOfYear()
                 : $startDate->copy()->endOfMonth();
 
-            // Доходы
+            // Доходы (все)
             $incomeTransactions = Transaction::where('user_id', $userId)
                 ->where('type', 'income')
                 ->whereBetween('date', [$startDate, $endDate])
                 ->with(['currency'])
                 ->get();
 
-            // Расходы
-            $expenseQuery = Transaction::where('user_id', $userId)
+            // Расходы - ВСЕ (включая аномалии) для аналитики
+            $expenseTransactions = Transaction::where('user_id', $userId)
                 ->where('type', 'expense')
                 ->whereBetween('date', [$startDate, $endDate])
-                ->with(['categories', 'currency']);
-
-            if (!$includeAnomalies) {
-                $expenseQuery->where('is_anomaly', false);
-            }
-
-            $expenseTransactions = $expenseQuery->get();
+                ->with(['categories', 'currency'])
+                ->get();
 
             $baseCurrency = Currency::where('code', 'BYN')->first();
             if (!$baseCurrency) {
                 return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
             }
 
-            // Конвертация
+            // Конвертация доходов
             $incomeRatesCache = $this->loadRatesForTransactions($incomeTransactions, $baseCurrency);
             $totalIncome = 0;
             foreach ($incomeTransactions as $transaction) {
                 $totalIncome += $this->convertToBaseCurrency($transaction, $baseCurrency, $incomeRatesCache);
             }
 
+            // Конвертация расходов (все, включая аномалии)
             $expenseRatesCache = $this->loadRatesForTransactions($expenseTransactions, $baseCurrency);
             $totalExpense = 0;
             $categoryTotals = [];
@@ -793,7 +856,7 @@ class AnalyticsController extends Controller
         try {
             $userId = $this->getUserId();
 
-            // ========== 1. ПОЛУЧАЕМ ВСЕ ТРАНЗАКЦИИ ==========
+            // Получаем ВСЕ транзакции расходов
             $allTransactions = Transaction::where('user_id', $userId)
                 ->where('type', 'expense')
                 ->with(['categories', 'currency'])
@@ -809,31 +872,34 @@ class AnalyticsController extends Controller
                 ]);
             }
 
-            // ========== 2. ОБНАРУЖЕНИЕ И ИСКЛЮЧЕНИЕ АНОМАЛИЙ ==========
-            $anomalies = $this->anomalyService->detectAnomalies($allTransactions);
-            $cleanTransactions = $this->anomalyService->getCleanTransactions($allTransactions);
-            $anomaliesStats = $this->anomalyService->getAnomaliesStats($allTransactions);
+            // ========== ДЛЯ ОТОБРАЖЕНИЯ В ТАБЛИЦЕ ==========
+            // Аномалии по алгоритму (показываем пользователю)
+            $anomaliesList = $this->anomalyService->getAnomaliesList($allTransactions);
 
-            // ========== 3. ПРОВЕРЯЕМ, ОСТАЛИСЬ ЛИ ТРАНЗАКЦИИ ПОСЛЕ ОЧИСТКИ ==========
-            if ($cleanTransactions->isEmpty()) {
+            // ========== ДЛЯ ПРОГНОЗА ==========
+            // Берем транзакции, учитывая ТОЛЬКО ручные метки is_anomaly
+            $transactionsForForecast = $this->anomalyService->getCleanTransactions($allTransactions);
+
+            // Проверяем, остались ли транзакции для прогноза
+            if ($transactionsForForecast->isEmpty()) {
                 return response()->json([
                     'status' => 'success',
                     'data' => [
                         'has_data' => false,
-                        'message' => 'После исключения аномальных транзакций не осталось данных для прогноза.'
+                        'message' => 'После исключения отмеченных пользователем аномалий не осталось данных для прогноза.'
                     ]
                 ]);
             }
 
-            // ========== 4. ФОРМИРУЕМ МАССИВ ПОМЕСЯЧНЫХ РАСХОДОВ (УЖЕ БЕЗ АНОМАЛИЙ) ==========
-            $cleanTransactionsByMonth = $cleanTransactions->groupBy(fn($t) => $t->date->format('Y-m'));
+            // Формируем массив помесячных расходов
+            $transactionsByMonth = $transactionsForForecast->groupBy(fn($t) => $t->date->format('Y-m'));
 
             $baseCurrency = Currency::where('code', 'BYN')->first();
             if (!$baseCurrency) {
                 return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
             }
 
-            $ratesCache = $this->loadRatesForTransactions($cleanTransactions, $baseCurrency);
+            $ratesCache = $this->loadRatesForTransactions($transactionsForForecast, $baseCurrency);
 
             $monthlyExpenses = [];
             $now = Carbon::now();
@@ -841,7 +907,7 @@ class AnalyticsController extends Controller
             for ($i = 29; $i >= 0; $i--) {
                 $date = $now->copy()->subMonths($i);
                 $monthKey = $date->format('Y-m');
-                $monthTransactions = $cleanTransactionsByMonth[$monthKey] ?? collect();
+                $monthTransactions = $transactionsByMonth[$monthKey] ?? collect();
 
                 $total = 0;
                 foreach ($monthTransactions as $transaction) {
@@ -861,14 +927,14 @@ class AnalyticsController extends Controller
                     'data' => [
                         'has_data' => true,
                         'forecast_available' => false,
-                        'message' => 'Недостаточно полных месяцев данных после исключения аномалий. Накопите больше истории.',
+                        'message' => 'Недостаточно полных месяцев данных для прогноза.',
                         'complete_months_available' => $monthsCount,
-                        'anomalies_removed' => $anomaliesStats
+                        'anomalies_list' => $anomaliesList
                     ]
                 ]);
             }
 
-            // ========== 5. ВЫПОЛНЯЕМ ПРОГНОЗ ==========
+            // Выполняем прогноз
             $monthlyForecast = $this->forecastService->forecast($monthlyExpenses, 3);
             $strategy = $this->forecastService->getStrategy($monthsCount);
 
@@ -883,7 +949,7 @@ class AnalyticsController extends Controller
                 ]);
             }
 
-            // ========== 6. ФОРМИРУЕМ ОСТАЛЬНЫЕ ДАННЫЕ ==========
+            // Формируем остальные данные
             $remainingMonth = $this->forecastRemainingCurrentMonth($userId);
             $nextMonthDate = Carbon::now()->addMonth()->startOfMonth();
             $lastCompleteMonthTotal = end($monthlyExpenses);
@@ -901,13 +967,19 @@ class AnalyticsController extends Controller
             $trend = $this->calculateTrendFromData($monthlyExpenses);
             $seasonalFactor = $this->calculateSeasonalFactor($userId, $monthlyExpenses);
 
+            // Прогноз по категориям для первого месяца
+            $categoryForecasts = $this->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $trend);
+
+            // Прогноз по категориям для второго месяца (с учетом тренда)
+            $secondMonthTrendFactor = $trend * $trend; // Усиленный тренд для второго месяца
+            $secondMonthCategoryForecasts = $this->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $secondMonthTrendFactor);
+
             return response()->json([
                 'status' => 'success',
                 'data' => [
                     'has_data' => true,
                     'forecast_available' => true,
-                    'detector' => $this->anomalyService->getDetectorName(),
-                    'anomalies_removed' => $anomaliesStats,
+                    'anomalies_list' => $anomaliesList,
                     'model' => $strategy->getName(),
                     'confidence' => ($conf = $this->calculateConfidence($userId))['percent'],
                     'confidence_level' => $conf['level'],
@@ -916,8 +988,8 @@ class AnalyticsController extends Controller
                     'remaining_current_month' => $remainingMonth,
                     'next_month' => $nextMonthSummary,
                     'second_month' => $secondMonthSummary,
-                    'category_forecasts' => $this->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $trend),
-                    'excluded_anomalies' => $this->getAnomaliesStats($userId, null, null, true),
+                    'category_forecasts' => $categoryForecasts,
+                    'second_month_category_forecasts' => $secondMonthCategoryForecasts,
                     'trend_factor' => round($trend, 3),
                     'seasonal_factor' => round($seasonalFactor, 2),
                     'model_metrics' => $this->calculateModelMetrics($monthlyExpenses, $monthlyForecast),
@@ -928,6 +1000,47 @@ class AnalyticsController extends Controller
         } catch (\Exception $e) {
             Log::error('Forecast error: ' . $e->getMessage());
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+    public function batchMarkAnomalies(Request $request)
+    {
+        try {
+            $userId = $this->getUserId();
+
+            $validated = $request->validate([
+                'anomalies' => 'required|array',
+                'anomalies.*.id' => 'required|integer|exists:transactions,id',
+                'anomalies.*.is_anomaly' => 'required|boolean'
+            ]);
+
+            $updatedCount = 0;
+            $errors = [];
+
+            foreach ($validated['anomalies'] as $item) {
+                $success = $this->anomalyService->updateAnomalyStatus($item['id'], $userId, $item['is_anomaly']);
+
+                if ($success) {
+                    $updatedCount++;
+                } else {
+                    $errors[] = $item['id'];
+                }
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Обновлено {$updatedCount} транзакций",
+                'data' => [
+                    'updated_count' => $updatedCount,
+                    'errors' => $errors
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Batch mark anomalies error: ' . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Ошибка: ' . $e->getMessage()
+            ], 500);
         }
     }
 }

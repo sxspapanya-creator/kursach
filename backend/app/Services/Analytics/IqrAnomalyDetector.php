@@ -90,56 +90,89 @@ class IqrAnomalyDetector implements AnomalyDetectorInterface
         return (float)$transaction->amount * $rate;
     }
 
+    /**
+     * Рассчитывает квартили по массиву значений
+     */
+    private function calculateQuartiles(array $values): array
+    {
+        $n = count($values);
+        sort($values);
+
+        $q1Index = (int)($n * 0.25);
+        $q3Index = (int)($n * 0.75);
+
+        return [
+            'q1' => $values[$q1Index],
+            'q3' => $values[$q3Index],
+            'iqr' => $values[$q3Index] - $values[$q1Index]
+        ];
+    }
+
+    /**
+     * Детектит аномалии по алгоритму (ДЛЯ ОТОБРАЖЕНИЯ В ТАБЛИЦЕ)
+     * НЕ учитывает ручные метки пользователя
+     */
     public function detect(Collection $transactions): Collection
     {
         if ($transactions->isEmpty()) return collect();
 
         $this->loadRates($transactions);
 
-        // Конвертируем суммы в базовую валюту
-        $amounts = [];
-        $transactionMap = [];
+        $groupedByCategory = $transactions->groupBy(function ($transaction) {
+            $category = $transaction->categories->first();
+            return $category ? $category->id : 'uncategorized';
+        });
 
-        foreach ($transactions as $transaction) {
-            $amountInBase = $this->convertToBaseCurrency($transaction);
-            $amounts[] = $amountInBase;
-            $transactionMap[$transaction->id] = $transaction;
-        }
+        $algorithmAnomalies = collect();
 
-        $n = count($amounts);
-        if ($n < 8) return collect();
+        foreach ($groupedByCategory as $categoryId => $categoryTransactions) {
+            if ($categoryTransactions->count() < 8) {
+                continue;
+            }
 
-        sort($amounts);
+            $amounts = [];
+            $transactionMap = [];
 
-        $q1Index = (int)($n * 0.25);
-        $q3Index = (int)($n * 0.75);
+            foreach ($categoryTransactions as $transaction) {
+                $amountInBase = $this->convertToBaseCurrency($transaction);
+                $amounts[] = $amountInBase;
+                $transactionMap[$transaction->id] = $transaction;
+            }
 
-        $q1 = $amounts[$q1Index];
-        $q3 = $amounts[$q3Index];
-        $iqr = $q3 - $q1;
+            $quartiles = $this->calculateQuartiles($amounts);
+            $threshold = $quartiles['q3'] + (3 * $quartiles['iqr']);
 
-        // Порог для экстремальных выбросов: Q3 + 3×IQR
-        $threshold = $q3 + (3 * $iqr);
-
-        $anomalies = collect();
-        foreach ($transactionMap as $id => $transaction) {
-            $amount = $this->convertToBaseCurrency($transaction);
-            if ($amount > $threshold) {
-                $anomalies->push($transaction);
+            foreach ($transactionMap as $id => $transaction) {
+                $amount = $this->convertToBaseCurrency($transaction);
+                if ($amount > $threshold) {
+                    $algorithmAnomalies->push($transaction);
+                }
             }
         }
 
-        return $anomalies;
+        return $algorithmAnomalies->unique('id');
     }
 
+    /**
+     * Возвращает транзакции для прогноза
+     * Учитывает ТОЛЬКО ручные метки is_anomaly из БД
+     * АЛГОРИТМ НЕ ИСПОЛЬЗУЕТСЯ!
+     */
     public function filterOutliers(Collection $transactions): Collection
     {
-        $anomalyIds = $this->detect($transactions)->pluck('id')->toArray();
-        return $transactions->filter(fn($t) => !in_array($t->id, $anomalyIds));
+        return $transactions->filter(function ($transaction) {
+            // Если пользователь отметил "это аномалия" - исключаем из прогноза
+            if ($transaction->is_anomaly === true) {
+                return false;
+            }
+
+            // Во всех остальных случаях (false или null) - включаем в прогноз
+            return true;
+        });
     }
 
     public function getName(): string
     {
-        return 'IQR (Q3 + 3×IQR)';
+        return 'IQR по категориям (только для отображения)';
     }
 }
