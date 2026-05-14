@@ -72,6 +72,24 @@
             <div class="field-hint">После смены email потребуется подтверждение</div>
           </div>
 
+          <!-- ========== ДОБАВЛЕНО: День зарплаты ========== -->
+          <div class="form-group">
+            <label class="form-label">📅 День зарплаты</label>
+            <div class="salary-day-input">
+              <input
+                  v-model.number="form.salary_day"
+                  type="number"
+                  class="form-input salary-day-field"
+                  placeholder="25"
+                  min="1"
+                  max="28"
+              >
+              <span class="salary-day-hint">(1-28)</span>
+            </div>
+            <div class="field-hint">Используется для расчёта ликвидности (хватит ли денег до зарплаты)</div>
+          </div>
+          <!-- ========================================= -->
+
           <!-- Поле для кода подтверждения (показывается только если ожидается подтверждение) -->
           <div v-if="needsVerification" class="form-group">
             <label class="form-label">Код подтверждения</label>
@@ -170,19 +188,19 @@
 
         <div v-else-if="planGroupSections.length" class="plans-by-code">
           <section
-            v-for="section in planGroupSections"
-            :key="section.code"
-            class="plan-code-group"
+              v-for="section in planGroupSections"
+              :key="section.code"
+              class="plan-code-group"
           >
             <div class="plan-group-header">
               <h3 class="plan-group-title">{{ formatGroupTitle(section.code) }}</h3>
             </div>
             <div class="plans-grid">
               <div
-                v-for="plan in section.plans"
-                :key="plan.id"
-                class="plan-offer-card"
-                :class="{ current: isCurrentPlan(plan) }"
+                  v-for="plan in section.plans"
+                  :key="plan.id"
+                  class="plan-offer-card"
+                  :class="{ current: isCurrentPlan(plan) }"
               >
                 <div class="plan-offer-head">
                   <h4 class="plan-offer-title">{{ plan.name }}</h4>
@@ -191,10 +209,10 @@
                 </div>
                 <p class="plan-offer-desc">{{ plan.description }}</p>
                 <button
-                  type="button"
-                  class="btn btn-primary plan-select-btn"
-                  :disabled="isCurrentPlan(plan) || settingPlanId !== null"
-                  @click="selectPlan(plan)"
+                    type="button"
+                    class="btn btn-primary plan-select-btn"
+                    :disabled="isCurrentPlan(plan) || settingPlanId !== null"
+                    @click="selectPlan(plan)"
                 >
                   <span v-if="settingPlanId === plan.id" class="spinner"></span>
                   {{ isCurrentPlan(plan) ? 'Текущий тариф' : settingPlanId === plan.id ? 'Сохранение…' : 'Выбрать' }}
@@ -206,10 +224,10 @@
 
         <div v-else-if="plans.length" class="plans-grid">
           <div
-            v-for="plan in plans"
-            :key="plan.id"
-            class="plan-offer-card"
-            :class="{ current: isCurrentPlan(plan) }"
+              v-for="plan in plans"
+              :key="plan.id"
+              class="plan-offer-card"
+              :class="{ current: isCurrentPlan(plan) }"
           >
             <div class="plan-offer-head">
               <h4 class="plan-offer-title">{{ plan.name }}</h4>
@@ -218,10 +236,10 @@
             </div>
             <p class="plan-offer-desc">{{ plan.description }}</p>
             <button
-              type="button"
-              class="btn btn-primary plan-select-btn"
-              :disabled="isCurrentPlan(plan) || settingPlanId !== null"
-              @click="selectPlan(plan)"
+                type="button"
+                class="btn btn-primary plan-select-btn"
+                :disabled="isCurrentPlan(plan) || settingPlanId !== null"
+                @click="selectPlan(plan)"
             >
               <span v-if="settingPlanId === plan.id" class="spinner"></span>
               {{ isCurrentPlan(plan) ? 'Текущий тариф' : settingPlanId === plan.id ? 'Сохранение…' : 'Выбрать' }}
@@ -285,7 +303,8 @@ export default {
 
     const form = ref({
       name: '',
-      email: ''
+      email: '',
+      salary_day: 25  // ← ДОБАВЛЕНО
     })
 
     const passwordForm = ref({
@@ -377,6 +396,7 @@ export default {
           user.value = response.data.user
           form.value.name = response.data.user.name || ''
           form.value.email = response.data.user.email || ''
+          form.value.salary_day = response.data.user.salary_day || 25  // ← ДОБАВЛЕНО
           localStorage.setItem('user', JSON.stringify(response.data.user))
         }
       } catch (err) {
@@ -448,7 +468,8 @@ export default {
       try {
         const response = await axios.put('/auth/profile', {
           name: form.value.name,
-          email: form.value.email
+          email: form.value.email,
+          salary_day: form.value.salary_day  // ← ДОБАВЛЕНО
         })
 
         if (response.data.status === 'success') {
@@ -557,7 +578,7 @@ export default {
     }
 
     const confirmLogout = () => {
-        logout()
+      logout()
     }
 
     // Выход из личного кабинета

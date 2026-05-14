@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\Log;
 
 class AnalyticsController extends Controller
 {
-    // Возвращает ID авторизованного пользователя или 401 ошибку
+    // ==================== БАЗОВЫЕ МЕТОДЫ ====================
+
     protected function getUserId()
     {
         $userId = Auth::id();
@@ -91,7 +92,7 @@ class AnalyticsController extends Controller
         }
     }
 
-    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ КУРСОВ ВАЛЮТ ====================
+    // ==================== КОНВЕРТАЦИЯ ВАЛЮТ ====================
 
     private function loadRatesForTransactions(Collection $transactions, Currency $baseCurrency): array
     {
@@ -113,7 +114,6 @@ class AnalyticsController extends Controller
         foreach ($allRates as $rate) {
             $currencyId = $rate->from_currency_id;
             $dateKey = $rate->date->toDateString();
-            if (!isset($rates[$currencyId])) $rates[$currencyId] = [];
             $rates[$currencyId][$dateKey] = $rate->rate;
         }
         return $rates;
@@ -150,239 +150,154 @@ class AnalyticsController extends Controller
     {
         if ($transaction->currency_id == $baseCurrency->id) return (float) $transaction->amount;
 
-        $rate = null;
-        if (!empty($ratesCache)) {
-            $rate = $this->getRateFromCache($ratesCache, $transaction->currency_id, $transaction->date, $baseCurrency);
-        }
+        $rate = $this->getRateFromCache($ratesCache, $transaction->currency_id, $transaction->date, $baseCurrency);
+
         if ($rate === null) {
             $rate = $this->getRateFromDatabase($transaction->currency_id, $baseCurrency->id, $transaction->date);
         }
+
         if ($rate === null) {
             Log::warning("Курс не найден для валюты {$transaction->currency_id} на дату {$transaction->date}");
             return (float) $transaction->amount;
         }
+
         return (float) $transaction->amount * $rate;
     }
 
-    // ==================== ОСНОВНОЙ МЕТОД OVERVIEW ====================
+    // ==================== ЗАРПЛАТНЫЙ ДЕНЬ ====================
 
-    public function overview(Request $request)
+    private function getUserSalaryDay(int $userId): int
     {
-        try {
-            $userId = $this->getUserId();
-            $validated = $request->validate([
-                'period' => 'nullable|in:month,year',
-                'year' => 'nullable|integer|min:2000|max:2100',
-                'month' => 'nullable|integer|min:1|max:12',
-                'include_anomalies' => 'nullable|in:true,false,0,1'
-            ]);
-
-            $period = $validated['period'] ?? 'month';
-            $year = $validated['year'] ?? date('Y');
-            $month = $validated['month'] ?? date('m');
-            $includeAnomalies = $request->boolean('include_anomalies', false);
-
-            $startDate = null;
-            $endDate = null;
-
-            switch ($period) {
-                case 'year':
-                    $startDate = Carbon::create($year, 1, 1)->startOfYear();
-                    $endDate = Carbon::create($year, 12, 31)->endOfYear();
-                    break;
-                default:
-                    $startDate = Carbon::create($year, $month, 1)->startOfMonth();
-                    $endDate = $startDate->copy()->endOfMonth();
-                    break;
-            }
-
-            // Доходы - всегда учитываем ВСЕ (аномалии в доходах - это реальные деньги)
-            $incomeTransactions = Transaction::where('user_id', $userId)
-                ->where('type', 'income')
-                ->whereBetween('date', [$startDate, $endDate])
-                ->with(['currency'])
-                ->get();
-
-            // Расходы - по умолчанию исключаем аномалии, можно включить параметром
-            $expenseQuery = Transaction::where('user_id', $userId)
-                ->where('type', 'expense')
-                ->whereBetween('date', [$startDate, $endDate])
-                ->with(['categories', 'currency']);
-
-            if (!$includeAnomalies) {
-                $expenseQuery->where('is_anomaly', false);
-            }
-
-            $expenseTransactions = $expenseQuery->get();
-
-            $baseCurrency = Currency::where('code', 'BYN')->first();
-            if (!$baseCurrency) {
-                return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
-            }
-
-            // Конвертируем доходы
-            $incomeRatesCache = $this->loadRatesForTransactions($incomeTransactions, $baseCurrency);
-            $totalIncome = 0;
-            foreach ($incomeTransactions as $transaction) {
-                $totalIncome += $this->convertToBaseCurrency($transaction, $baseCurrency, $incomeRatesCache);
-            }
-
-            // Конвертируем расходы
-            $expenseRatesCache = $this->loadRatesForTransactions($expenseTransactions, $baseCurrency);
-            $totalExpense = 0;
-            $categoryTotals = [];
-
-            foreach ($expenseTransactions as $transaction) {
-                $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $expenseRatesCache);
-                $totalExpense += $amountInBase;
-
-                foreach ($transaction->categories as $category) {
-                    $catId = $category->id;
-                    if (!isset($categoryTotals[$catId])) {
-                        $categoryTotals[$catId] = [
-                            'id' => $catId,
-                            'name' => $category->name,
-                            'color' => $category->color ?? '#3498db',
-                            'total' => 0,
-                            'budget_limit' => $category->budget_limit ?? 0
-                        ];
-                    }
-                    $categoryTotals[$catId]['total'] += $amountInBase;
-                }
-            }
-
-            $balance = $totalIncome - $totalExpense;
-            $savingsRate = $totalIncome > 0 ? ($balance / $totalIncome) * 100 : 0;
-
-            $categorySpending = [];
-            foreach ($categoryTotals as $cat) {
-                $limitPercentage = 0;
-                $budgetStatus = 'no_limit';
-                if ($cat['budget_limit'] > 0) {
-                    $limitPercentage = ($cat['total'] / $cat['budget_limit']) * 100;
-                    if ($limitPercentage <= 80) $budgetStatus = 'good';
-                    elseif ($limitPercentage <= 100) $budgetStatus = 'warning';
-                    else $budgetStatus = 'critical';
-                }
-                $categorySpending[] = [
-                    'id' => $cat['id'],
-                    'name' => $cat['name'],
-                    'color' => $cat['color'],
-                    'total' => round($cat['total'], 2),
-                    'budget_limit' => (float) $cat['budget_limit'],
-                    'limit_percentage' => round($limitPercentage, 1),
-                    'budget_status' => $budgetStatus,
-                    'average_monthly' => round($cat['total'], 2)
-                ];
-            }
-
-            usort($categorySpending, fn($a, $b) => $b['total'] <=> $a['total']);
-
-            // Финансовое здоровье - считаем С учетом ВСЕХ доходов и ВСЕХ расходов (реальная картина)
-            $financialHealth = $this->calculateFinancialHealth($userId, null, true);
-
-            // Статистика по исключенным аномалиям
-            $excludedAnomalies = $this->getExcludedAnomaliesStats($userId, $startDate, $endDate, $includeAnomalies);
-
-            return response()->json([
-                'status' => 'success',
-                'data' => [
-                    'totals' => [
-                        'income' => round($totalIncome, 2),
-                        'expenses' => round($totalExpense, 2),
-                        'balance' => round($balance, 2),
-                        'savings_rate' => round($savingsRate, 1)
-                    ],
-                    'date_range' => [
-                        'start' => $startDate->format('Y-m-d'),
-                        'end' => $endDate->format('Y-m-d'),
-                        'label' => $startDate->translatedFormat('F Y')
-                    ],
-                    'category_spending' => $categorySpending,
-                    'financial_health' => $financialHealth,
-                    'anomalies_info' => $excludedAnomalies
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Overview error: ' . $e->getMessage());
-            return response()->json(['status' => 'error', 'message' => 'Ошибка: ' . $e->getMessage()], 500);
-        }
+        $user = \App\Models\User::find($userId);
+        return $user->salary_day ?? 25;
     }
 
-    private function getExcludedAnomaliesStats(int $userId, Carbon $startDate, Carbon $endDate, bool $includeAnomalies): array
+    private function getDaysUntilNextSalary(int $userId, int $salaryDay, Carbon $currentDate): int
     {
-        if ($includeAnomalies) {
+        $today = $currentDate->copy()->startOfDay();
+        $nextSalaryDate = Carbon::create($today->year, $today->month, $salaryDay)->startOfDay();
+
+        if ($nextSalaryDate <= $today) {
+            $nextSalaryDate->addMonth();
+        }
+
+        return $today->diffInDays($nextSalaryDate);
+    }
+
+    // ==================== СТАТИСТИКА ПО АНОМАЛИЯМ ====================
+
+    private function getAnomaliesStats(int $userId, ?Carbon $startDate = null, ?Carbon $endDate = null, bool $forForecast = false): array
+    {
+        $query = Transaction::where('user_id', $userId)
+            ->where('type', 'expense')
+            ->where('is_anomaly', true);
+
+        if ($startDate && $endDate && !$forForecast) {
+            $query->whereBetween('date', [$startDate, $endDate]);
+        }
+
+        $totalCount = $query->count();
+        $totalAmount = $query->sum('amount');
+
+        if ($forForecast) {
+            $recentCount = Transaction::where('user_id', $userId)
+                ->where('type', 'expense')
+                ->where('is_anomaly', true)
+                ->where('date', '>=', Carbon::now()->subMonths(3))
+                ->count();
+
             return [
-                'excluded' => false,
-                'message' => 'В расчет включены все транзакции, включая разовые'
+                'total_count' => $totalCount,
+                'recent_3_months_count' => $recentCount,
+                'total_amount' => round($totalAmount, 2),
+                'excluded_from_forecast' => true,
+                'message' => $totalCount > 0 ? "{$totalCount} разовых транзакций исключены из прогноза" : null
             ];
         }
 
-        $anomaliesCount = Transaction::where('user_id', $userId)
-            ->where('type', 'expense')
-            ->where('is_anomaly', true)
-            ->whereBetween('date', [$startDate, $endDate])
-            ->count();
-
-        $anomaliesAmount = Transaction::where('user_id', $userId)
-            ->where('type', 'expense')
-            ->where('is_anomaly', true)
-            ->whereBetween('date', [$startDate, $endDate])
-            ->sum('amount');
-
         return [
             'excluded' => true,
-            'count' => $anomaliesCount,
-            'total_amount' => round($anomaliesAmount, 2),
-            'message' => $anomaliesCount > 0
-                ? "{$anomaliesCount} разовых транзакций исключены из аналитики"
-                : null
+            'count' => $totalCount,
+            'total_amount' => round($totalAmount, 2),
+            'message' => $totalCount > 0 ? "{$totalCount} разовых транзакций исключены из аналитики" : null
         ];
     }
 
     // ==================== ФИНАНСОВОЕ ЗДОРОВЬЕ ====================
 
-    /**
-     * Расчет финансового здоровья
-     * @param bool $includeAnomalies - true: учитываем все расходы (реальная картина), false: исключаем аномалии (для прогнозов)
-     */
-    private function calculateFinancialHealth(int $userId, ?Carbon $currentDate = null, bool $includeAnomalies = true): array
+    private function getMonthlyLoanPayments(int $userId): float
+    {
+        $loanCategory = Category::where('user_id', $userId)
+            ->whereIn('name', ['Кредиты', 'Кредит', 'Займы', 'Рассрочка'])
+            ->where('type', 'expense')
+            ->first();
+
+        if (!$loanCategory) return 0;
+
+        $threeMonthsAgo = Carbon::now()->subMonths(3);
+
+        return Transaction::where('user_id', $userId)
+                ->whereHas('categories', fn($q) => $q->where('categories.id', $loanCategory->id))
+                ->whereBetween('date', [$threeMonthsAgo, Carbon::now()])
+                ->sum('amount') / 3;
+    }
+
+    private function getCurrentCycleBalance(int $userId, Carbon $currentDate, int $salaryDay): float
+    {
+        $lastSalaryDate = Carbon::create($currentDate->year, $currentDate->month, $salaryDay);
+        if ($lastSalaryDate > $currentDate) $lastSalaryDate->subMonth();
+
+        $income = Transaction::where('user_id', $userId)
+            ->where('type', 'income')
+            ->whereBetween('date', [$lastSalaryDate, $currentDate])
+            ->sum('amount');
+
+        $expense = Transaction::where('user_id', $userId)
+            ->where('type', 'expense')
+            ->whereBetween('date', [$lastSalaryDate, $currentDate])
+            ->sum('amount');
+
+        return $income - $expense;
+    }
+
+    private function calculateFinancialHealth(int $userId): array
     {
         try {
-            // Не позволяем использовать будущие даты
-            if (!$currentDate || $currentDate > Carbon::now()) {
-                $currentDate = Carbon::now();
-            }
+            $currentDate = Carbon::now();
 
             $salaryDay = $this->getUserSalaryDay($userId);
             $threeMonthsAgo = $currentDate->copy()->subMonths(3);
 
-            // Доходы - всегда учитываем ВСЕ (аномалии в доходах - это реальные деньги)
-            $avgMonthlyIncome = Transaction::where('user_id', $userId)
-                    ->where('type', 'income')
-                    ->whereBetween('date', [$threeMonthsAgo, $currentDate])
-                    ->sum('amount') / 3;
+            $stats = Transaction::where('user_id', $userId)
+                ->whereBetween('date', [$threeMonthsAgo, $currentDate])
+                ->selectRaw('
+                    SUM(CASE WHEN type = "income" THEN amount ELSE 0 END) as total_income,
+                    SUM(CASE WHEN type = "expense" THEN amount ELSE 0 END) as total_expense
+                ')
+                ->first();
 
-            // Расходы - учитываем или исключаем аномалии в зависимости от параметра
-            $expenseQuery = Transaction::where('user_id', $userId)
-                ->where('type', 'expense')
-                ->whereBetween('date', [$threeMonthsAgo, $currentDate]);
+            $totalIncome3Months = $stats->total_income ?? 0;
+            $totalExpense3Months = $stats->total_expense ?? 0;
 
-            if (!$includeAnomalies) {
-                $expenseQuery->where('is_anomaly', false);
-            }
+            $avgMonthlyIncome = $totalIncome3Months / 3;
+            $avgMonthlyExpense = $totalExpense3Months / 3;
 
-            $avgMonthlyExpense = $expenseQuery->sum('amount') / 3;
+            $allStats = Transaction::where('user_id', $userId)
+                ->selectRaw('
+                    SUM(CASE WHEN type = "income" THEN amount ELSE 0 END) as total_income_all,
+                    SUM(CASE WHEN type = "expense" THEN amount ELSE 0 END) as total_expense_all
+                ')
+                ->first();
 
-            // Сбережения
-            $savings = $this->getUserSavings($userId, $includeAnomalies);
-            $monthlyLoanPayments = $this->getMonthlyLoanPayments($userId, $includeAnomalies);
-            $cycleBalance = $this->getCurrentCycleBalance($userId, $currentDate, $salaryDay, $includeAnomalies);
+            $totalIncomeAll = $allStats->total_income_all ?? 0;
+            $totalExpenseAll = $allStats->total_expense_all ?? 0;
+
+            $savings = max(0, $totalIncomeAll - $totalExpenseAll);
+            $monthlyLoanPayments = $this->getMonthlyLoanPayments($userId);
+            $cycleBalance = $this->getCurrentCycleBalance($userId, $currentDate, $salaryDay);
             $daysUntilSalary = $this->getDaysUntilNextSalary($userId, $salaryDay, $currentDate);
 
-            $dailyExpenseRate = $avgMonthlyExpense / 30;
-            $neededUntilSalary = $dailyExpenseRate * max(1, $daysUntilSalary);
+            $neededUntilSalary = ($avgMonthlyExpense / 30) * max(1, $daysUntilSalary);
 
             // Ликвидность (30%)
             if ($cycleBalance <= 0) $liquidityScore = 0;
@@ -391,13 +306,20 @@ class AnalyticsController extends Controller
             elseif ($cycleBalance >= $neededUntilSalary * 0.7) $liquidityScore = 40;
             else $liquidityScore = 10;
 
-            // Подушка безопасности (30%)
-            if ($avgMonthlyExpense <= 0) $emergencyFundScore = 50;
-            elseif ($savings >= $avgMonthlyExpense * 6) $emergencyFundScore = 100;
-            elseif ($savings >= $avgMonthlyExpense * 3) $emergencyFundScore = 70;
-            elseif ($savings >= $avgMonthlyExpense * 1) $emergencyFundScore = 40;
-            elseif ($savings > 0) $emergencyFundScore = 20;
-            else $emergencyFundScore = 0;
+            // Подушка безопасности (30%) - цель 3 месяца
+            if ($avgMonthlyExpense <= 0) {
+                $emergencyFundScore = 50;
+            } elseif ($savings >= $avgMonthlyExpense * 3) {
+                $emergencyFundScore = 100;
+            } elseif ($savings >= $avgMonthlyExpense * 2) {
+                $emergencyFundScore = 70;
+            } elseif ($savings >= $avgMonthlyExpense * 1) {
+                $emergencyFundScore = 40;
+            } elseif ($savings >= $avgMonthlyExpense * 0.5) {
+                $emergencyFundScore = 20;
+            } else {
+                $emergencyFundScore = 0;
+            }
 
             // Долговая нагрузка (20%)
             if ($avgMonthlyIncome <= 0) $debtLoadScore = 0;
@@ -409,6 +331,7 @@ class AnalyticsController extends Controller
             // Норма сбережений (20%)
             $availableAfterExpenses = $avgMonthlyIncome - $avgMonthlyExpense - $monthlyLoanPayments;
             $savingsRate = $avgMonthlyIncome > 0 ? ($availableAfterExpenses / $avgMonthlyIncome) * 100 : 0;
+
             if ($savingsRate >= 20) $savingsRateScore = 100;
             elseif ($savingsRate >= 10) $savingsRateScore = 70;
             elseif ($savingsRate >= 5) $savingsRateScore = 40;
@@ -430,14 +353,28 @@ class AnalyticsController extends Controller
                 'status_label' => $statusLabel,
                 'color' => $color,
                 'components' => [
-                    'liquidity' => ['score' => round($liquidityScore), 'balance' => round($cycleBalance, 2), 'needed_until_salary' => round($neededUntilSalary, 2), 'days_until_salary' => $daysUntilSalary],
-                    'emergency_fund' => ['score' => round($emergencyFundScore), 'savings' => round($savings, 2), 'months_coverage' => $avgMonthlyExpense > 0 ? round($savings / $avgMonthlyExpense, 1) : 0],
-                    'debt_load' => ['score' => round($debtLoadScore), 'monthly_payments' => round($monthlyLoanPayments, 2), 'percent_of_income' => $avgMonthlyIncome > 0 ? round(($monthlyLoanPayments / $avgMonthlyIncome) * 100) : 0],
-                    'savings_rate' => ['score' => round($savingsRateScore), 'rate' => round($savingsRate, 1), 'saved_amount' => round($availableAfterExpenses, 2)]
-                ],
-                'calculation_note' => $includeAnomalies
-                    ? 'Расчет с учетом всех транзакций (включая разовые)'
-                    : 'Расчет без учета разовых транзакций'
+                    'liquidity' => [
+                        'score' => round($liquidityScore),
+                        'balance' => round($cycleBalance, 2),
+                        'needed_until_salary' => round($neededUntilSalary, 2),
+                        'days_until_salary' => $daysUntilSalary
+                    ],
+                    'emergency_fund' => [
+                        'score' => round($emergencyFundScore),
+                        'savings' => round($savings, 2),
+                        'months_coverage' => $avgMonthlyExpense > 0 ? round($savings / $avgMonthlyExpense, 1) : 0
+                    ],
+                    'debt_load' => [
+                        'score' => round($debtLoadScore),
+                        'monthly_payments' => round($monthlyLoanPayments, 2),
+                        'percent_of_income' => $avgMonthlyIncome > 0 ? round(($monthlyLoanPayments / $avgMonthlyIncome) * 100) : 0
+                    ],
+                    'savings_rate' => [
+                        'score' => round($savingsRateScore),
+                        'rate' => round($savingsRate, 1),
+                        'saved_amount' => round($availableAfterExpenses, 2)
+                    ]
+                ]
             ];
         } catch (\Exception $e) {
             Log::error('Financial health error: ' . $e->getMessage());
@@ -445,183 +382,48 @@ class AnalyticsController extends Controller
         }
     }
 
-    private function getCurrentCycleBalance(int $userId, Carbon $currentDate, int $salaryDay, bool $includeAnomalies = true): float
+    // ==================== ПРОГНОЗИРОВАНИЕ ====================
+
+    private function getExpensesForMonth(int $userId, int $year, int $month, ?int $categoryId = null): float
     {
-        $lastSalaryDate = Carbon::create($currentDate->year, $currentDate->month, $salaryDay);
-        if ($lastSalaryDate > $currentDate) $lastSalaryDate->subMonth();
-
-        $income = Transaction::where('user_id', $userId)
-            ->where('type', 'income')
-            ->where('date', '>=', $lastSalaryDate)
-            ->where('date', '<=', $currentDate)
-            ->sum('amount');
-
-        $expenseQuery = Transaction::where('user_id', $userId)
-            ->where('type', 'expense')
-            ->where('date', '>=', $lastSalaryDate)
-            ->where('date', '<=', $currentDate);
-
-        if (!$includeAnomalies) {
-            $expenseQuery->where('is_anomaly', false);
-        }
-
-        $expense = $expenseQuery->sum('amount');
-
-        return $income - $expense;
-    }
-
-    private function getUserSalaryDay(int $userId): int {
-        // Исключаем аномалии
-        $incomes = Transaction::where('user_id', $userId)
-            ->where('type', 'income')
-            ->where('is_anomaly', false)
-            ->where('date', '>=', Carbon::now()->subMonths(3))
-            ->get();
-
-        if ($incomes->isEmpty()) return 25;
-
-        // Ищем повторяющиеся суммы (зарплата обычно повторяется)
-        $amountCount = [];
-        foreach ($incomes as $income) {
-            $roundedAmount = round($income->amount / 100) * 100;
-            $amountCount[$roundedAmount] = ($amountCount[$roundedAmount] ?? 0) + 1;
-        }
-
-        // Находим самую частую сумму
-        $maxCount = 0;
-        $mostFrequentAmount = 0;
-        foreach ($amountCount as $amount => $count) {
-            if ($count > $maxCount) {
-                $maxCount = $count;
-                $mostFrequentAmount = $amount;
-            }
-        }
-
-        // Берём доходы с этой суммой
-        $potentialSalaries = $incomes->filter(
-            fn($t) => round($t->amount / 100) * 100 == $mostFrequentAmount
-        );
-
-        if ($potentialSalaries->isEmpty()) return 25;
-
-        // Считаем дни
-        $dayCount = [];
-        foreach ($potentialSalaries as $salary) {
-            $day = Carbon::parse($salary->date)->day;
-            $dayCount[$day] = ($dayCount[$day] ?? 0) + 1;
-        }
-
-        $maxCount = 0;
-        $salaryDay = 25;
-        foreach ($dayCount as $day => $count) {
-            if ($count > $maxCount) {
-                $maxCount = $count;
-                $salaryDay = $day;
-            }
-        }
-
-        return $salaryDay;
-    }
-
-    private function getDaysUntilNextSalary(int $userId, int $salaryDay, Carbon $currentDate): int
-    {
-        $nextSalaryDate = Carbon::create($currentDate->year, $currentDate->month, $salaryDay);
-        if ($nextSalaryDate <= $currentDate) $nextSalaryDate->addMonth();
-        return $currentDate->diffInDays($nextSalaryDate);
-    }
-
-    private function getUserSavings(int $userId, bool $includeAnomalies = true): float
-    {
-        $totalIncome = Transaction::where('user_id', $userId)
-            ->where('type', 'income')
-            ->sum('amount');
-
-        $expenseQuery = Transaction::where('user_id', $userId)
-            ->where('type', 'expense');
-
-        if (!$includeAnomalies) {
-            $expenseQuery->where('is_anomaly', false);
-        }
-
-        $totalExpense = $expenseQuery->sum('amount');
-
-        return max(0, $totalIncome - $totalExpense);
-    }
-
-    private function getMonthlyLoanPayments(int $userId, bool $includeAnomalies = true): float
-    {
-        $loanCategory = Category::where('user_id', $userId)->where('name', 'Кредиты')->where('type', 'expense')->first();
-        if ($loanCategory) {
-            $threeMonthsAgo = Carbon::now()->subMonths(3);
-
-            $query = Transaction::where('user_id', $userId)
-                ->whereHas('categories', fn($q) => $q->where('categories.id', $loanCategory->id))
-                ->whereBetween('date', [$threeMonthsAgo, Carbon::now()]);
-
-            if (!$includeAnomalies) {
-                $query->where('is_anomaly', false);
-            }
-
-            $total = $query->sum('amount');
-            return $total / 3;
-        }
-        return 0;
-    }
-
-    // ==================== МЕТОДЫ ДЛЯ ПРОГНОЗИРОВАНИЯ (всегда исключаем аномалии) ====================
-
-    private function getMonthlyExpenseAmount(int $userId, int $year, int $month): float
-    {
-        // Для ПРОГНОЗОВ - всегда исключаем аномалии
-        $transactions = Transaction::where('user_id', $userId)
+        $query = Transaction::where('user_id', $userId)
             ->where('type', 'expense')
             ->where('is_anomaly', false)
             ->with(['currency'])
             ->whereYear('date', $year)
-            ->whereMonth('date', $month)
-            ->get();
+            ->whereMonth('date', $month);
+
+        if ($categoryId !== null) {
+            $query->whereHas('categories', fn($q) => $q->where('categories.id', $categoryId));
+        }
+
+        $transactions = $query->get();
 
         $baseCurrency = Currency::where('code', 'BYN')->first();
         if (!$baseCurrency) return 0;
+
         $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
         $total = 0;
         foreach ($transactions as $transaction) {
             $total += $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
         }
         return $total;
+    }
+
+    private function getMonthlyExpenseAmount(int $userId, int $year, int $month): float
+    {
+        return $this->getExpensesForMonth($userId, $year, $month);
     }
 
     private function getCategoryMonthlyExpense(int $userId, int $categoryId, int $year, int $month): float
     {
-        // Для ПРОГНОЗОВ - всегда исключаем аномалии
-        $transactions = Transaction::where('user_id', $userId)
-            ->where('type', 'expense')
-            ->where('is_anomaly', false)
-            ->whereHas('categories', fn($q) => $q->where('categories.id', $categoryId))
-            ->with(['currency'])
-            ->whereYear('date', $year)
-            ->whereMonth('date', $month)
-            ->get();
-
-        $baseCurrency = Currency::where('code', 'BYN')->first();
-        if (!$baseCurrency) return 0;
-        $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
-        $total = 0;
-        foreach ($transactions as $transaction) {
-            $total += $this->convertToBaseCurrency($transaction, $baseCurrency, $ratesCache);
-        }
-        return $total;
+        return $this->getExpensesForMonth($userId, $year, $month, $categoryId);
     }
 
     private function getMonthlyExpenseAmountForCompleteMonth(int $userId, int $year, int $month): float
     {
         $date = Carbon::create($year, $month, 1);
-        $lastDayOfMonth = $date->copy()->endOfMonth();
-
-        if ($lastDayOfMonth > Carbon::now()) {
-            return 0;
-        }
-
+        if ($date->copy()->endOfMonth() > Carbon::now()) return 0;
         return $this->getMonthlyExpenseAmount($userId, $year, $month);
     }
 
@@ -633,94 +435,41 @@ class AnalyticsController extends Controller
         for ($i = $months - 1; $i >= 0; $i--) {
             $date = $now->copy()->subMonths($i);
             $amount = $this->getMonthlyExpenseAmountForCompleteMonth($userId, $date->year, $date->month);
-            if ($amount > 0) {
-                $result[] = $amount;
-            }
+            if ($amount > 0) $result[] = $amount;
         }
 
         return $result;
     }
 
-    // ==================== ПРОГНОЗ НА ОСТАТОК ТЕКУЩЕГО МЕСЯЦА ====================
-
-    private function forecastRemainingCurrentMonth(int $userId): array
+    private function getForecastConfig(int $monthsCount): array
     {
-        $now = Carbon::now();
-        $currentMonth = $now->month;
-        $currentYear = $now->year;
-        $daysPassed = $now->day - 1;
-        $daysTotal = $now->daysInMonth;
-
-        if ($daysPassed <= 0) {
-            $daysPassed = 1;
-        }
-
-        $actualSpent = $this->getMonthlyExpenseAmount($userId, $currentYear, $currentMonth);
-        $currentDailyRate = $actualSpent / $daysPassed;
-
-        $lastMonth = $now->copy()->subMonth();
-        $lastMonthTotal = $this->getMonthlyExpenseAmount($userId, $lastMonth->year, $lastMonth->month);
-        $lastMonthDailyRate = $lastMonthTotal / $lastMonth->daysInMonth;
-
-        $currentWeight = min(0.8, $daysPassed / $daysTotal);
-        $lastWeight = 1 - $currentWeight;
-        $weightedDailyRate = ($currentDailyRate * $currentWeight) + ($lastMonthDailyRate * $lastWeight);
-
-        $daysLeft = $daysTotal - $daysPassed;
-        $forecastRemaining = $weightedDailyRate * $daysLeft;
-
-        $dayFactors = $this->calculateDayOfWeekFactors($userId);
-
-        $dailyBreakdown = [];
-        $currentDate = $now->copy();
-
-        for ($i = 0; $i < $daysLeft; $i++) {
-            $dayOfWeek = $currentDate->dayOfWeek;
-            $dayFactor = $dayFactors[$dayOfWeek] ?? 1.0;
-            $dayForecast = $weightedDailyRate * $dayFactor;
-
-            $dailyBreakdown[] = [
-                'date' => $currentDate->format('Y-m-d'),
-                'day_of_week' => $this->getRussianDayOfWeek($dayOfWeek),
-                'forecast' => round($dayForecast, 2)
+        if ($monthsCount < 7) {
+            return [
+                'model' => 'SimpleExtrapolation',
+                'message' => '⚠️ Прогноз на основе минимальных данных (3-6 месяцев). Рекомендуется накопить больше истории.',
+                'method' => 'simpleExtrapolation'
             ];
-
-            $currentDate->addDay();
         }
-
+        if ($monthsCount < 15) {
+            return [
+                'model' => 'LinearRegression',
+                'message' => '📊 Прогноз имеет хорошую точность. Для улучшения рекомендуется накопить 15+ месяцев данных.',
+                'method' => 'linearRegression'
+            ];
+        }
+        if ($monthsCount < 24) {
+            return [
+                'model' => 'DoubleExponentialSmoothing',
+                'message' => '✅ Прогноз имеет высокую точность.',
+                'method' => 'doubleExponentialSmoothingImproved'
+            ];
+        }
         return [
-            'days_left' => $daysLeft,
-            'already_spent' => round($actualSpent, 2),
-            'daily_rate_current' => round($currentDailyRate, 2),
-            'daily_rate_last_month' => round($lastMonthDailyRate, 2),
-            'weighted_daily_rate' => round($weightedDailyRate, 2),
-            'current_month_weight' => round($currentWeight * 100),
-            'last_month_weight' => round($lastWeight * 100),
-            'forecast_total' => round($forecastRemaining, 2),
-            'forecast_full_month' => round($actualSpent + $forecastRemaining, 2),
-            'daily_breakdown' => $dailyBreakdown
+            'model' => 'HoltWinters',
+            'message' => '✅ Прогноз имеет высокую точность с учетом сезонности.',
+            'method' => 'holtWinters'
         ];
     }
-
-    private function forecastFullMonthSummary(float $monthlyForecast, Carbon $targetMonth, float $previousMonthActual): array
-    {
-        $changePercent = $previousMonthActual > 0
-            ? round(($monthlyForecast - $previousMonthActual) / $previousMonthActual * 100, 1)
-            : 0;
-
-        $trend = $changePercent > 5 ? 'growth' : ($changePercent < -5 ? 'decline' : 'stable');
-
-        return [
-            'month' => $targetMonth->translatedFormat('F Y'),
-            'total_forecast' => round($monthlyForecast, 2),
-            'daily_average' => round($monthlyForecast / $targetMonth->daysInMonth, 2),
-            'change_from_previous' => $changePercent,
-            'trend' => $trend,
-            'days_in_month' => $targetMonth->daysInMonth
-        ];
-    }
-
-    // ==================== МЕТОДЫ ПРОГНОЗИРОВАНИЯ ====================
 
     private function simpleExtrapolation(array $data, int $steps): array
     {
@@ -750,9 +499,7 @@ class AnalyticsController extends Controller
     private function linearRegression(array $data, int $steps): array
     {
         $n = count($data);
-        if ($n < 2) {
-            return $this->simpleExtrapolation($data, $steps);
-        }
+        if ($n < 2) return $this->simpleExtrapolation($data, $steps);
 
         $x = range(0, $n - 1);
         $y = $data;
@@ -763,9 +510,7 @@ class AnalyticsController extends Controller
         $sumX2 = array_sum(array_map(fn($xi) => $xi * $xi, $x));
 
         $denominator = ($n * $sumX2 - $sumX * $sumX);
-        if ($denominator == 0) {
-            return $this->simpleExtrapolation($data, $steps);
-        }
+        if ($denominator == 0) return $this->simpleExtrapolation($data, $steps);
 
         $slope = ($n * $sumXY - $sumX * $sumY) / $denominator;
         $intercept = ($sumY - $slope * $sumX) / $n;
@@ -781,12 +526,10 @@ class AnalyticsController extends Controller
         return $forecast;
     }
 
-    private function doubleExponentialSmoothingImproved(array $data, int $forecastSteps = 6): array
+    private function doubleExponentialSmoothingImproved(array $data, int $forecastSteps): array
     {
         $n = count($data);
-        if ($n < 4) {
-            return $this->linearRegression($data, $forecastSteps);
-        }
+        if ($n < 4) return $this->linearRegression($data, $forecastSteps);
 
         list($alpha, $beta) = $this->optimizeHoltParametersAdvanced($data);
         list($level, $trend) = $this->initHoltWintersWithLinearRegression($data);
@@ -804,16 +547,13 @@ class AnalyticsController extends Controller
 
         $lastValue = $data[$n - 1];
         $forecast = $this->constrainForecast($forecast, $lastValue);
-        $forecast = $this->smoothForecast($forecast);
-        return $forecast;
+        return $this->smoothForecast($forecast);
     }
 
-    private function holtWinters(array $data, int $seasonalPeriod = 12, int $forecastSteps = 6): array
+    private function holtWinters(array $data, int $seasonalPeriod, int $forecastSteps): array
     {
         $n = count($data);
-        if ($n < $seasonalPeriod * 2) {
-            return $this->doubleExponentialSmoothingImproved($data, $forecastSteps);
-        }
+        if ($n < $seasonalPeriod * 2) return $this->doubleExponentialSmoothingImproved($data, $forecastSteps);
 
         list($alpha, $beta, $gamma) = $this->optimizeHoltWintersParameters($data);
         list($level, $trend, $seasonality) = $this->initHoltWintersWithParams($data, $seasonalPeriod, $alpha, $beta, $gamma);
@@ -833,8 +573,6 @@ class AnalyticsController extends Controller
         }
         return $forecast;
     }
-
-    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ ПРОГНОЗИРОВАНИЯ ====================
 
     private function optimizeHoltParametersAdvanced(array $data): array
     {
@@ -875,7 +613,6 @@ class AnalyticsController extends Controller
 
         $level = $data[0];
         $trend = $data[1] - $data[0];
-
         $mapeSum = 0;
         $rmseSum = 0;
         $validCount = 0;
@@ -1027,180 +764,100 @@ class AnalyticsController extends Controller
     {
         $smoothed = [];
         $window = 3;
+        $count = count($forecast);
 
-        for ($i = 0; $i < count($forecast); $i++) {
+        for ($i = 0; $i < $count; $i++) {
             $sum = 0;
-            $count = 0;
+            $windowCount = 0;
             for ($j = -$window; $j <= $window; $j++) {
                 $idx = $i + $j;
-                if ($idx >= 0 && $idx < count($forecast)) {
+                if ($idx >= 0 && $idx < $count) {
                     $sum += $forecast[$idx];
-                    $count++;
+                    $windowCount++;
                 }
             }
-            $smoothed[] = $sum / $count;
+            $smoothed[] = $sum / $windowCount;
         }
         return $smoothed;
     }
 
-    // ==================== ВЫБОР МЕТОДА ====================
-
     private function selectForecastMethod(array $data, int $forecastSteps = 3): ?array
     {
         $n = count($data);
-
         if ($n < 3) return null;
-        if ($n < 7) return $this->simpleExtrapolation($data, $forecastSteps);
-        if ($n < 15) return $this->linearRegression($data, $forecastSteps);
-        if ($n < 24) return $this->doubleExponentialSmoothingImproved($data, $forecastSteps);
-        return $this->holtWinters($data, 12, $forecastSteps);
+
+        $config = $this->getForecastConfig($n);
+
+        return match($config['method']) {
+            'simpleExtrapolation' => $this->simpleExtrapolation($data, $forecastSteps),
+            'linearRegression' => $this->linearRegression($data, $forecastSteps),
+            'doubleExponentialSmoothingImproved' => $this->doubleExponentialSmoothingImproved($data, $forecastSteps),
+            'holtWinters' => $this->holtWinters($data, 12, $forecastSteps),
+            default => null
+        };
     }
 
-    // ==================== ОСНОВНОЙ ПУБЛИЧНЫЙ МЕТОД FORECAST ====================
-
-    public function forecast(Request $request): \Illuminate\Http\JsonResponse
+    private function forecastRemainingCurrentMonth(int $userId): array
     {
-        try {
-            $userId = $this->getUserId();
+        $now = Carbon::now();
+        $daysPassed = $now->day - 1;
+        $daysTotal = $now->daysInMonth;
+        if ($daysPassed <= 0) $daysPassed = 1;
 
-            // Проверяем наличие обычных транзакций (не аномальных)
-            $hasRegularTransactions = Transaction::where('user_id', $userId)
-                ->where('is_anomaly', false)
-                ->exists();
+        $actualSpent = $this->getMonthlyExpenseAmount($userId, $now->year, $now->month);
+        $currentDailyRate = $actualSpent / $daysPassed;
 
-            if (!$hasRegularTransactions) {
-                return response()->json([
-                    'status' => 'success',
-                    'data' => [
-                        'has_data' => false,
-                        'message' => 'Нет данных для прогноза. Добавьте транзакции или отметьте существующие как обычные.'
-                    ]
-                ]);
-            }
+        $lastMonth = $now->copy()->subMonth();
+        $lastMonthTotal = $this->getMonthlyExpenseAmount($userId, $lastMonth->year, $lastMonth->month);
+        $lastMonthDailyRate = $lastMonthTotal / $lastMonth->daysInMonth;
 
-            $completeMonthsData = $this->getCompleteMonthsExpensesArray($userId, 24);
-            $monthsCount = count($completeMonthsData);
+        $currentWeight = min(0.8, $daysPassed / $daysTotal);
+        $weightedDailyRate = ($currentDailyRate * $currentWeight) + ($lastMonthDailyRate * (1 - $currentWeight));
 
-            if ($monthsCount < 3) {
-                return response()->json([
-                    'status' => 'success',
-                    'data' => [
-                        'has_data' => true,
-                        'forecast_available' => false,
-                        'message' => 'Недостаточно полных месяцев данных. Накопите минимум 3 месяца истории (аномальные транзакции исключены).',
-                        'complete_months_available' => $monthsCount
-                    ]
-                ]);
-            }
+        $daysLeft = $daysTotal - $daysPassed;
+        $forecastRemaining = $weightedDailyRate * $daysLeft;
 
-            $monthlyForecast = $this->selectForecastMethod($completeMonthsData, 3);
+        $dayFactors = $this->calculateDayOfWeekFactors($userId);
+        $dailyBreakdown = [];
+        $currentDate = $now->copy();
 
-            if ($monthlyForecast === null) {
-                return response()->json([
-                    'status' => 'success',
-                    'data' => [
-                        'has_data' => true,
-                        'forecast_available' => false,
-                        'message' => 'Не удалось построить прогноз'
-                    ]
-                ]);
-            }
-
-            $remainingMonth = $this->forecastRemainingCurrentMonth($userId);
-
-            $nextMonthDate = Carbon::now()->addMonth()->startOfMonth();
-            $lastCompleteMonthTotal = end($completeMonthsData);
-            $nextMonthSummary = $this->forecastFullMonthSummary($monthlyForecast[0], $nextMonthDate, $lastCompleteMonthTotal);
-
-            $secondMonthDate = Carbon::now()->addMonths(2)->startOfMonth();
-            $secondMonthSummary = $this->forecastFullMonthSummary($monthlyForecast[1] ?? $monthlyForecast[0], $secondMonthDate, $monthlyForecast[0]);
-
-            $lastCompleteMonth = Carbon::now()->subMonth()->startOfMonth();
-            $baselineTotal = $this->getMonthlyExpenseAmount($userId, $lastCompleteMonth->year, $lastCompleteMonth->month);
-            $dailyBaseline = $baselineTotal / $lastCompleteMonth->daysInMonth;
-
-            $trend = $this->calculateTrendFromData($completeMonthsData);
-            $seasonalFactor = $this->calculateSeasonalFactor($userId, $completeMonthsData);
-
-            $categoryForecasts = $this->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $trend);
-
-            $confidence = $this->calculateConfidence($userId);
-            $modelMetrics = $this->calculateModelMetrics($completeMonthsData, $monthlyForecast);
-            $excludedAnomalies = $this->getExcludedAnomaliesInfo($userId);
-
-            return response()->json([
-                'status' => 'success',
-                'data' => [
-                    'has_data' => true,
-                    'forecast_available' => true,
-                    'model' => $this->getMethodName($monthsCount),
-                    'confidence' => $confidence['percent'],
-                    'confidence_level' => $confidence['level'],
-                    'confidence_text' => $confidence['text'],
-                    'complete_months_used' => $monthsCount,
-                    'remaining_current_month' => $remainingMonth,
-                    'next_month' => $nextMonthSummary,
-                    'second_month' => $secondMonthSummary,
-                    'category_forecasts' => $categoryForecasts,
-                    'excluded_anomalies' => $excludedAnomalies,
-                    'trend_factor' => round($trend, 3),
-                    'seasonal_factor' => round($seasonalFactor, 2),
-                    'model_metrics' => $modelMetrics,
-                    'reliability_message' => $this->getReliabilityMessage($monthsCount)
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Forecast error: ' . $e->getMessage());
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        for ($i = 0; $i < $daysLeft; $i++) {
+            $dayOfWeek = $currentDate->dayOfWeek;
+            $dayFactor = $dayFactors[$dayOfWeek] ?? 1.0;
+            $dailyBreakdown[] = [
+                'date' => $currentDate->format('Y-m-d'),
+                'day_of_week' => $this->getRussianDayOfWeek($dayOfWeek),
+                'forecast' => round($weightedDailyRate * $dayFactor, 2)
+            ];
+            $currentDate->addDay();
         }
-    }
-
-    private function getExcludedAnomaliesInfo(int $userId): array
-    {
-        $totalAnomalies = Transaction::where('user_id', $userId)
-            ->where('is_anomaly', true)
-            ->where('type', 'expense')
-            ->count();
-
-        $recentAnomalies = Transaction::where('user_id', $userId)
-            ->where('is_anomaly', true)
-            ->where('type', 'expense')
-            ->where('date', '>=', Carbon::now()->subMonths(3))
-            ->count();
-
-        $anomaliesAmount = Transaction::where('user_id', $userId)
-            ->where('is_anomaly', true)
-            ->where('type', 'expense')
-            ->sum('amount');
 
         return [
-            'total_count' => $totalAnomalies,
-            'recent_3_months_count' => $recentAnomalies,
-            'total_amount' => round($anomaliesAmount, 2),
-            'excluded_from_forecast' => true,
-            'message' => $totalAnomalies > 0
-                ? "{$totalAnomalies} разовых транзакций исключены из прогноза"
-                : null
+            'days_left' => $daysLeft,
+            'already_spent' => round($actualSpent, 2),
+            'daily_rate_current' => round($currentDailyRate, 2),
+            'daily_rate_last_month' => round($lastMonthDailyRate, 2),
+            'weighted_daily_rate' => round($weightedDailyRate, 2),
+            'forecast_total' => round($forecastRemaining, 2),
+            'forecast_full_month' => round($actualSpent + $forecastRemaining, 2),
+            'daily_breakdown' => $dailyBreakdown
         ];
     }
 
-    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ ОТВЕТА ====================
-
-    private function getReliabilityMessage(int $monthsCount): string
+    private function forecastFullMonthSummary(float $monthlyForecast, Carbon $targetMonth, float $previousMonthActual): array
     {
-        if ($monthsCount < 7) return '⚠️ Прогноз на основе минимальных данных (3-6 месяцев). Рекомендуется накопить больше истории.';
-        if ($monthsCount < 15) return '📊 Прогноз имеет хорошую точность. Для улучшения рекомендуется накопить 15+ месяцев данных.';
-        if ($monthsCount < 24) return '✅ Прогноз имеет высокую точность.';
-        return '✅ Прогноз имеет высокую точность с учетом сезонности.';
-    }
+        $changePercent = $previousMonthActual > 0
+            ? round(($monthlyForecast - $previousMonthActual) / $previousMonthActual * 100, 1)
+            : 0;
 
-    private function getMethodName(int $monthsCount): string
-    {
-        if ($monthsCount < 7) return 'SimpleExtrapolation';
-        if ($monthsCount < 15) return 'LinearRegression';
-        if ($monthsCount < 24) return 'DoubleExponentialSmoothing';
-        return 'HoltWinters';
+        return [
+            'month' => $targetMonth->translatedFormat('F Y'),
+            'total_forecast' => round($monthlyForecast, 2),
+            'daily_average' => round($monthlyForecast / $targetMonth->daysInMonth, 2),
+            'change_from_previous' => $changePercent,
+            'trend' => $changePercent > 5 ? 'growth' : ($changePercent < -5 ? 'decline' : 'stable'),
+            'days_in_month' => $targetMonth->daysInMonth
+        ];
     }
 
     private function calculateDayOfWeekFactors(int $userId): array
@@ -1208,28 +865,20 @@ class AnalyticsController extends Controller
         $defaultFactors = [0 => 1.0, 1 => 0.85, 2 => 0.85, 3 => 0.85, 4 => 1.15, 5 => 1.2, 6 => 1.2];
 
         $startDate = Carbon::now()->subMonths(3);
-        $endDate = Carbon::now();
-
         $transactions = Transaction::where('user_id', $userId)
             ->where('type', 'expense')
             ->where('is_anomaly', false)
-            ->whereBetween('date', [$startDate, $endDate])
+            ->whereBetween('date', [$startDate, Carbon::now()])
             ->get();
 
-        if ($transactions->count() < 10) {
-            return $defaultFactors;
-        }
+        if ($transactions->count() < 10) return $defaultFactors;
 
         $baseCurrency = Currency::where('code', 'BYN')->first();
-        if (!$baseCurrency) {
-            return $defaultFactors;
-        }
+        if (!$baseCurrency) return $defaultFactors;
 
         $ratesCache = $this->loadRatesForTransactions($transactions, $baseCurrency);
-
         $dailyTotals = array_fill(0, 7, 0.0);
         $dailyWeights = array_fill(0, 7, 0.0);
-
         $now = Carbon::now();
 
         foreach ($transactions as $transaction) {
@@ -1237,44 +886,33 @@ class AnalyticsController extends Controller
             $dayOfWeek = Carbon::parse($transaction->date)->dayOfWeek;
             $daysAgo = Carbon::parse($transaction->date)->diffInDays($now);
             $weight = exp(-$daysAgo / 45);
-
             $dailyTotals[$dayOfWeek] += $amountInBase * $weight;
             $dailyWeights[$dayOfWeek] += $weight;
         }
 
         $dailyAverages = [];
         for ($i = 0; $i < 7; $i++) {
-            $dailyAverages[$i] = $dailyWeights[$i] > 0
-                ? $dailyTotals[$i] / $dailyWeights[$i]
-                : 0;
+            $dailyAverages[$i] = $dailyWeights[$i] > 0 ? $dailyTotals[$i] / $dailyWeights[$i] : 0;
         }
 
         $totalWeightedSum = array_sum($dailyTotals);
         $totalWeight = array_sum($dailyWeights);
-
-        if ($totalWeight <= 0) {
-            return $defaultFactors;
-        }
+        if ($totalWeight <= 0) return $defaultFactors;
 
         $totalAverage = $totalWeightedSum / $totalWeight;
-
-        if ($totalAverage <= 0) {
-            return $defaultFactors;
-        }
+        if ($totalAverage <= 0) return $defaultFactors;
 
         $dataConfidence = min(0.8, $transactions->count() / 100);
-
         $factors = [];
+
         for ($i = 0; $i < 7; $i++) {
             if ($dailyAverages[$i] > 0) {
-                $calculatedFactor = $dailyAverages[$i] / $totalAverage;
-                $calculatedFactor = max(0.6, min(1.8, $calculatedFactor));
+                $calculatedFactor = min(1.8, max(0.6, $dailyAverages[$i] / $totalAverage));
                 $factors[$i] = ($calculatedFactor * $dataConfidence) + ($defaultFactors[$i] * (1 - $dataConfidence));
             } else {
                 $factors[$i] = $defaultFactors[$i];
             }
         }
-
         return $factors;
     }
 
@@ -1287,7 +925,6 @@ class AnalyticsController extends Controller
     {
         $categories = Category::where('user_id', $userId)->where('type', 'expense')->get();
         $forecasts = [];
-
         $lastCompleteMonth = Carbon::now()->subMonth()->startOfMonth();
         $daysInMonth = $lastCompleteMonth->daysInMonth;
 
@@ -1332,6 +969,7 @@ class AnalyticsController extends Controller
         $firstHalf = array_sum(array_slice($data, 0, floor($n / 2))) / floor($n / 2);
         $secondHalf = array_sum(array_slice($data, floor($n / 2))) / ceil($n / 2);
         if ($firstHalf == 0) return 1.0;
+
         $trend = $secondHalf / $firstHalf;
         return max(0.95, min(1.05, $trend));
     }
@@ -1342,7 +980,6 @@ class AnalyticsController extends Controller
 
         $currentMonth = Carbon::now()->month;
         $currentYear = Carbon::now()->year;
-
         $lastYearAvg = 0;
         $count = 0;
 
@@ -1385,9 +1022,20 @@ class AnalyticsController extends Controller
         $mape = $validCount > 0 ? ($mapeSum / $validCount) * 100 : 0;
         $mse = $n > 0 ? $mseSum / $n : 0;
         $rmse = sqrt($mse);
-        $interpretation = $mape < 10 ? 'Высокая точность' : ($mape < 20 ? 'Хорошая точность' : ($mape < 30 ? 'Приемлемая точность' : 'Низкая точность'));
 
-        return ['mape' => round($mape, 1), 'mse' => round($mse, 2), 'rmse' => round($rmse, 2), 'interpretation' => $interpretation];
+        $interpretation = match(true) {
+            $mape < 10 => 'Высокая точность',
+            $mape < 20 => 'Хорошая точность',
+            $mape < 30 => 'Приемлемая точность',
+            default => 'Низкая точность'
+        };
+
+        return [
+            'mape' => round($mape, 1),
+            'mse' => round($mse, 2),
+            'rmse' => round($rmse, 2),
+            'interpretation' => $interpretation
+        ];
     }
 
     private function calculateConfidence(int $userId): array
@@ -1400,9 +1048,20 @@ class AnalyticsController extends Controller
         if (!$oldest) return ['percent' => 0, 'level' => 'low', 'text' => 'Нет данных'];
 
         $monthsOfData = Carbon::parse($oldest->date)->diffInMonths(Carbon::now());
-        $monthsScore = $this->calculateMonthsScore($monthsOfData);
+        $monthsScore = min(100, 100 * (1 - 1 / sqrt(max($monthsOfData, 3))));
+
         $monthlyExpenses = $this->getCompleteMonthsExpensesArray($userId, 12);
-        $stabilityScore = $this->calculateStabilityScore($monthlyExpenses);
+        $values = array_filter($monthlyExpenses, fn($v) => $v > 0);
+        $n = count($values);
+
+        if ($n < 3) $stabilityScore = 0;
+        else {
+            $mean = array_sum($values) / $n;
+            $variance = array_sum(array_map(fn($x) => pow($x - $mean, 2), $values)) / $n;
+            $cv = sqrt($variance) / $mean;
+            $stabilityScore = 100 * exp(-2 * $cv);
+        }
+
         $totalScore = ($monthsScore * 0.5) + ($stabilityScore * 0.5);
         $totalScore = round(min(100, max(0, $totalScore)));
 
@@ -1411,22 +1070,228 @@ class AnalyticsController extends Controller
         return ['percent' => $totalScore, 'level' => 'low', 'text' => 'Низкая надежность'];
     }
 
-    private function calculateMonthsScore(int $months): float
+    // ==================== API ENDPOINTS ====================
+
+    public function overview(Request $request)
     {
-        if ($months < 3) return 0;
-        return min(100, 100 * (1 - 1 / sqrt($months)));
+        try {
+            $userId = $this->getUserId();
+            $validated = $request->validate([
+                'period' => 'nullable|in:month,year',
+                'year' => 'nullable|integer|min:2000|max:2100',
+                'month' => 'nullable|integer|min:1|max:12',
+                'include_anomalies' => 'nullable|in:true,false,0,1'
+            ]);
+
+            $period = $validated['period'] ?? 'month';
+            $year = $validated['year'] ?? date('Y');
+            $month = $validated['month'] ?? date('m');
+            $includeAnomalies = $request->boolean('include_anomalies', false);
+
+            $startDate = $period === 'year'
+                ? Carbon::create($year, 1, 1)->startOfYear()
+                : Carbon::create($year, $month, 1)->startOfMonth();
+
+            $endDate = $period === 'year'
+                ? Carbon::create($year, 12, 31)->endOfYear()
+                : $startDate->copy()->endOfMonth();
+
+            // Доходы
+            $incomeTransactions = Transaction::where('user_id', $userId)
+                ->where('type', 'income')
+                ->whereBetween('date', [$startDate, $endDate])
+                ->with(['currency'])
+                ->get();
+
+            // Расходы
+            $expenseQuery = Transaction::where('user_id', $userId)
+                ->where('type', 'expense')
+                ->whereBetween('date', [$startDate, $endDate])
+                ->with(['categories', 'currency']);
+
+            if (!$includeAnomalies) {
+                $expenseQuery->where('is_anomaly', false);
+            }
+
+            $expenseTransactions = $expenseQuery->get();
+
+            $baseCurrency = Currency::where('code', 'BYN')->first();
+            if (!$baseCurrency) {
+                return response()->json(['status' => 'error', 'message' => 'Базовая валюта BYN не найдена'], 500);
+            }
+
+            // Конвертация
+            $incomeRatesCache = $this->loadRatesForTransactions($incomeTransactions, $baseCurrency);
+            $totalIncome = 0;
+            foreach ($incomeTransactions as $transaction) {
+                $totalIncome += $this->convertToBaseCurrency($transaction, $baseCurrency, $incomeRatesCache);
+            }
+
+            $expenseRatesCache = $this->loadRatesForTransactions($expenseTransactions, $baseCurrency);
+            $totalExpense = 0;
+            $categoryTotals = [];
+
+            foreach ($expenseTransactions as $transaction) {
+                $amountInBase = $this->convertToBaseCurrency($transaction, $baseCurrency, $expenseRatesCache);
+                $totalExpense += $amountInBase;
+
+                foreach ($transaction->categories as $category) {
+                    $catId = $category->id;
+                    if (!isset($categoryTotals[$catId])) {
+                        $categoryTotals[$catId] = [
+                            'id' => $catId,
+                            'name' => $category->name,
+                            'color' => $category->color ?? '#3498db',
+                            'total' => 0,
+                            'budget_limit' => $category->budget_limit ?? 0
+                        ];
+                    }
+                    $categoryTotals[$catId]['total'] += $amountInBase;
+                }
+            }
+
+            $balance = $totalIncome - $totalExpense;
+            $savingsRate = $totalIncome > 0 ? ($balance / $totalIncome) * 100 : 0;
+
+            $categorySpending = [];
+            foreach ($categoryTotals as $cat) {
+                $limitPercentage = 0;
+                $budgetStatus = 'no_limit';
+                if ($cat['budget_limit'] > 0) {
+                    $limitPercentage = ($cat['total'] / $cat['budget_limit']) * 100;
+                    if ($limitPercentage <= 80) $budgetStatus = 'good';
+                    elseif ($limitPercentage <= 100) $budgetStatus = 'warning';
+                    else $budgetStatus = 'critical';
+                }
+                $categorySpending[] = [
+                    'id' => $cat['id'],
+                    'name' => $cat['name'],
+                    'color' => $cat['color'],
+                    'total' => round($cat['total'], 2),
+                    'budget_limit' => (float) $cat['budget_limit'],
+                    'limit_percentage' => round($limitPercentage, 1),
+                    'budget_status' => $budgetStatus,
+                    'average_monthly' => round($cat['total'], 2)
+                ];
+            }
+
+            usort($categorySpending, fn($a, $b) => $b['total'] <=> $a['total']);
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'totals' => [
+                        'income' => round($totalIncome, 2),
+                        'expenses' => round($totalExpense, 2),
+                        'balance' => round($balance, 2),
+                        'savings_rate' => round($savingsRate, 1)
+                    ],
+                    'date_range' => [
+                        'start' => $startDate->format('Y-m-d'),
+                        'end' => $endDate->format('Y-m-d'),
+                        'label' => $startDate->translatedFormat('F Y')
+                    ],
+                    'category_spending' => $categorySpending,
+                    'financial_health' => $this->calculateFinancialHealth($userId),
+                    'anomalies_info' => $this->getAnomaliesStats($userId, $startDate, $endDate, false)
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Overview error: ' . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => 'Ошибка: ' . $e->getMessage()], 500);
+        }
     }
 
-    private function calculateStabilityScore(array $monthlyExpenses): float
+    public function forecast(Request $request): \Illuminate\Http\JsonResponse
     {
-        $values = array_filter($monthlyExpenses, fn($v) => $v > 0);
-        $n = count($values);
-        if ($n < 3) return 0;
-        $mean = array_sum($values) / $n;
-        if ($mean == 0) return 0;
-        $variance = array_sum(array_map(fn($x) => pow($x - $mean, 2), $values)) / $n;
-        $stdDev = sqrt($variance);
-        $cv = $stdDev / $mean;
-        return 100 * exp(-2 * $cv);
+        try {
+            $userId = $this->getUserId();
+
+            $hasRegularTransactions = Transaction::where('user_id', $userId)
+                ->where('is_anomaly', false)
+                ->exists();
+
+            if (!$hasRegularTransactions) {
+                return response()->json([
+                    'status' => 'success',
+                    'data' => [
+                        'has_data' => false,
+                        'message' => 'Нет данных для прогноза. Добавьте транзакции.'
+                    ]
+                ]);
+            }
+
+            $completeMonthsData = $this->getCompleteMonthsExpensesArray($userId, 30);
+            $monthsCount = count($completeMonthsData);
+
+            if ($monthsCount < 3) {
+                return response()->json([
+                    'status' => 'success',
+                    'data' => [
+                        'has_data' => true,
+                        'forecast_available' => false,
+                        'message' => 'Недостаточно полных месяцев данных. Накопите минимум 3 месяца истории.',
+                        'complete_months_available' => $monthsCount
+                    ]
+                ]);
+            }
+
+            $monthlyForecast = $this->selectForecastMethod($completeMonthsData, 3);
+            if ($monthlyForecast === null) {
+                return response()->json([
+                    'status' => 'success',
+                    'data' => [
+                        'has_data' => true,
+                        'forecast_available' => false,
+                        'message' => 'Не удалось построить прогноз'
+                    ]
+                ]);
+            }
+
+            $remainingMonth = $this->forecastRemainingCurrentMonth($userId);
+            $nextMonthDate = Carbon::now()->addMonth()->startOfMonth();
+            $lastCompleteMonthTotal = end($completeMonthsData);
+            $nextMonthSummary = $this->forecastFullMonthSummary($monthlyForecast[0], $nextMonthDate, $lastCompleteMonthTotal);
+            $secondMonthSummary = $this->forecastFullMonthSummary(
+                $monthlyForecast[1] ?? $monthlyForecast[0],
+                Carbon::now()->addMonths(2)->startOfMonth(),
+                $monthlyForecast[0]
+            );
+
+            $lastCompleteMonth = Carbon::now()->subMonth()->startOfMonth();
+            $baselineTotal = $this->getMonthlyExpenseAmount($userId, $lastCompleteMonth->year, $lastCompleteMonth->month);
+            $dailyBaseline = $baselineTotal / $lastCompleteMonth->daysInMonth;
+
+            $trend = $this->calculateTrendFromData($completeMonthsData);
+            $seasonalFactor = $this->calculateSeasonalFactor($userId, $completeMonthsData);
+            $forecastConfig = $this->getForecastConfig($monthsCount);
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'has_data' => true,
+                    'forecast_available' => true,
+                    'model' => $forecastConfig['model'],
+                    'confidence' => ($conf = $this->calculateConfidence($userId))['percent'],
+                    'confidence_level' => $conf['level'],
+                    'confidence_text' => $conf['text'],
+                    'complete_months_used' => $monthsCount,
+                    'remaining_current_month' => $remainingMonth,
+                    'next_month' => $nextMonthSummary,
+                    'second_month' => $secondMonthSummary,
+                    'category_forecasts' => $this->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $trend),
+                    'excluded_anomalies' => $this->getAnomaliesStats($userId, null, null, true),
+                    'trend_factor' => round($trend, 3),
+                    'seasonal_factor' => round($seasonalFactor, 2),
+                    'model_metrics' => $this->calculateModelMetrics($completeMonthsData, $monthlyForecast),
+                    'reliability_message' => $forecastConfig['message']
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Forecast error: ' . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
     }
 }

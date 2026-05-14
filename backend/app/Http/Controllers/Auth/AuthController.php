@@ -58,7 +58,8 @@ class AuthController extends Controller
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'password' => Hash::make($validated['password']),
-                'email_verified_at' => null
+                'email_verified_at' => null,
+                'salary_day' => 25
             ]);
 
             // Генерируем код подтверждения
@@ -286,7 +287,8 @@ class AuthController extends Controller
 
             $validated = $request->validate([
                 'name' => 'required|string|min:2|max:255',
-                'email' => 'required|email|max:255|unique:users,email,' . $user->id
+                'email' => 'required|email|max:255|unique:users,email,' . $user->id,
+                'salary_day' => 'sometimes|integer|min:1|max:28'
             ]);
 
             // Если email меняется - отправляем код подтверждения
@@ -298,7 +300,8 @@ class AuthController extends Controller
                 session()->put('pending_email_verification', [
                     'code' => $verificationCode,
                     'email' => $validated['email'],
-                    'name' => $validated['name']
+                    'name' => $validated['name'],
+                    'salary_day' => $validated['salary_day'] ?? $user->salary_day
                 ]);
 
                 // Отправляем письмо через Mailtrap
@@ -322,10 +325,12 @@ class AuthController extends Controller
                 }
             }
 
-            // Если email не меняется - просто обновляем имя
-            $user->update([
-                'name' => $validated['name']
-            ]);
+            // Если email не меняется - обновляем имя и salary_day
+            $updateData = ['name' => $validated['name']];
+            if (isset($validated['salary_day'])) {
+                $updateData['salary_day'] = $validated['salary_day'];
+            }
+            $user->update($updateData);
 
             return response()->json([
                 'status' => 'success',
@@ -382,11 +387,15 @@ class AuthController extends Controller
                 ], 422);
             }
 
-            // Обновляем email и имя
-            $user->update([
+            // Обновляем email, имя и salary_day
+            $updateData = [
                 'name' => $pendingVerification['name'],
                 'email' => $pendingVerification['email']
-            ]);
+            ];
+            if (isset($pendingVerification['salary_day'])) {
+                $updateData['salary_day'] = $pendingVerification['salary_day'];
+            }
+            $user->update($updateData);
 
             // Очищаем сессию
             session()->forget('pending_email_verification');
@@ -483,6 +492,7 @@ class AuthController extends Controller
             'plan_id' => $user->plan_id,
             'plan_expires_at' => $user->plan_expires_at?->format('Y-m-d'),
             'plan_code' => $planCode,
+            'salary_day' => $user->salary_day ?? 25,
         ];
     }
 }

@@ -662,4 +662,30 @@
         width: 100%;
         justify-content: center;
     }
+    /* Дополнительные стили для поля "День зарплаты" */
+    .salary-day-input {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .salary-day-field {
+        width: 100px;
+        text-align: center;
+    }
+
+    .salary-day-hint {
+        font-size: 13px;
+        color: #6c757d;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .field-hint {
+        font-size: 12px;
+        color: #6c757d;
+        margin-top: 5px;
+    }
 }

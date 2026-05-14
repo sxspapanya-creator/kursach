@@ -165,38 +165,6 @@
                   </div>
                 </div>
               </div>
-
-              <!-- Лимит бюджета (только для расходов) -->
-              <div class="form-group" v-if="formData.type === 'expense'">
-                <label class="form-label">
-                  <span class="label-text">Лимит бюджета</span>
-                  <span class="label-required">*</span>
-                  <span class="label-hint">(в BYN)</span>
-                </label>
-                <div class="input-with-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="2" y="6" width="20" height="12" rx="2"/>
-                    <path d="M16 16v-4M8 16v-4"/>
-                  </svg>
-                  <input
-                      v-model.number="formData.budget_limit"
-                      type="number"
-                      min="1"
-                      step="0.01"
-                      placeholder="0.00"
-                      required
-                      class="form-input"
-                      :class="{ 'has-error': formData.type === 'expense' && !formData.budget_limit }"
-                  >
-                  <span class="currency">Br</span>
-                </div>
-                <div v-if="formData.type === 'expense' && !formData.budget_limit" class="error-message">
-                  Для категории расходов необходимо установить лимит бюджета
-                </div>
-                <div class="field-hint">
-                  Установите месячный лимит для контроля расходов (в белорусских рублях)
-                </div>
-              </div>
             </div>
 
             <div class="form-actions">
@@ -226,7 +194,7 @@
                 </button>
                 <button
                     type="submit"
-                    :disabled="loading || !formData.name.trim() || (formData.type === 'expense' && !formData.budget_limit)"
+                    :disabled="loading || !formData.name.trim()"
                     class="btn btn-primary"
                 >
                   <span v-if="loading" class="btn-loading">
@@ -358,34 +326,6 @@
                 </div>
               </div>
             </div>
-
-            <!-- Бюджетная информация (только для расходов) -->
-            <div v-if="category.type === 'expense' && category.budget_limit" class="budget-section">
-              <div class="budget-header">
-                <span class="budget-label">Месячный лимит</span>
-                <span class="budget-limit">{{ formatMoney(category.budget_limit) }}</span>
-              </div>
-
-              <div v-if="category.total_amount !== undefined" class="budget-progress">
-                <div class="progress-bar">
-                  <div
-                      class="progress-fill"
-                      :style="{
-                      width: `${Math.min((category.total_amount / category.budget_limit) * 100, 100)}%`,
-                      backgroundColor: getProgressColor(category)
-                    }"
-                  ></div>
-                </div>
-                <div class="progress-info">
-                  <span class="progress-text">
-                    {{ Math.round((category.total_amount / category.budget_limit) * 100) }}%
-                  </span>
-                  <span v-if="isOverLimit(category)" class="progress-warning">
-                    ⚠️ Превышение
-                  </span>
-                </div>
-              </div>
-            </div>
           </div>
 
           <div class="category-footer">
@@ -464,8 +404,7 @@ export default {
     const formData = ref({
       name: '',
       type: 'expense',
-      color: '#3b82f6',
-      budget_limit: null
+      color: '#3b82f6'
     })
 
     // --- Computed ---
@@ -515,7 +454,6 @@ export default {
           name: c.name,
           type: c.type,
           color: c.color || colorOptions[c.type === 'income' ? 1 : 3],
-          budget_limit: c.budget_limit || null,
           transaction_count: c.transaction_count || 0,
           all_time_count: c.all_time_count ?? 0,
           total_amount: Math.abs(c.total_amount || 0),
@@ -542,8 +480,7 @@ export default {
       formData.value = {
         name: '',
         type,
-        color: colorOptions[type === 'income' ? 1 : 3],
-        budget_limit: type === 'expense' ? 1000 : null
+        color: colorOptions[type === 'income' ? 1 : 3]
       }
       showModal.value = true
     }
@@ -561,7 +498,7 @@ export default {
       showModal.value = false
       isEditing.value = false
       editingId.value = null
-      formData.value = { name: '', type: 'expense', color: '#3b82f6', budget_limit: null }
+      formData.value = { name: '', type: 'expense', color: '#3b82f6' }
       formErrors.value = {}
     }
 
@@ -572,10 +509,6 @@ export default {
         formErrors.value.name = 'Введите название категории'
       } else if (formData.value.name.length > 50) {
         formErrors.value.name = 'Название не должно превышать 50 символов'
-      }
-
-      if (formData.value.type === 'expense' && (!formData.value.budget_limit || formData.value.budget_limit <= 0)) {
-        formErrors.value.budget_limit = 'Установите лимит бюджета для расходов'
       }
 
       return Object.keys(formErrors.value).length === 0
@@ -589,7 +522,6 @@ export default {
         error.value = ''
 
         const payload = { ...formData.value, name: formData.value.name.trim() }
-        if (payload.type === 'income') payload.budget_limit = null
 
         if (isEditing.value) {
           await axios.put(`/api/categories/${editingId.value}`, payload)
@@ -645,16 +577,6 @@ export default {
       return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
     }
 
-    const isOverLimit = (category) => category.type === 'expense' && category.budget_limit && category.total_amount > category.budget_limit
-
-    const getProgressColor = (category) => {
-      if (category.type !== 'expense' || !category.budget_limit) return '#3b82f6'
-      const percent = (category.total_amount / category.budget_limit) * 100
-      if (percent >= 100) return '#ef4444'
-      if (percent >= 80) return '#f59e0b'
-      return '#10b981'
-    }
-
     onMounted(loadCategories)
 
     return {
@@ -680,9 +602,7 @@ export default {
       promptDelete,
       formatMoney,
       formatMoneyAmount,
-      formatDate,
-      isOverLimit,
-      getProgressColor
+      formatDate
     }
   }
 }

@@ -13,3 +13,5 @@ Route::put('/auth/password', [AuthController::class, 'changePassword']);
 Route::post('/auth/verify-email', [AuthController::class, 'verifyEmailChange']);
 Route::post('/auth/verify-registration', [AuthController::class, 'verifyRegistration']);
 Route::post('/auth/resend-verification', [AuthController::class, 'resendVerificationCode']);
+Route::get('/auth/salary-day', [AuthController::class, 'getSalaryDay']);
+Route::put('/auth/salary-day', [AuthController::class, 'updateSalaryDay']);

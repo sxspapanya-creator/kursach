@@ -42,6 +42,7 @@
       </div>
     </div>
 
+    <!-- Основные метрики -->
     <div class="metrics-grid">
       <div class="metric-card health-card" :style="{ borderColor: financialHealth.color }">
         <div class="metric-tooltip">
@@ -56,14 +57,29 @@
           </div>
           <div class="tooltip-text">
             <strong>Как рассчитано?</strong><br>
+
             📊 Ликвидность (30%): {{ financialHealth.components?.liquidity?.score || 0 }}%<br>
-            <span class="tooltip-sub">Остаток до зарплаты: {{ formatMoney(financialHealth.components?.liquidity?.balance) }}</span><br>
+            <span class="tooltip-sub">
+              Остаток до зарплаты: {{ formatMoney(financialHealth.components?.liquidity?.balance) }}<br>
+              Дней до зарплаты: {{ financialHealth.components?.liquidity?.days_until_salary || 0 }}
+            </span><br>
+
             🛡️ Подушка (30%): {{ financialHealth.components?.emergency_fund?.score || 0 }}%<br>
-            <span class="tooltip-sub">Сбережения: {{ formatMoney(financialHealth.components?.emergency_fund?.savings) }}</span><br>
+            <span class="tooltip-sub">
+              Сбережения: {{ formatMoney(financialHealth.components?.emergency_fund?.savings) }}<br>
+              Хватит на: {{ financialHealth.components?.emergency_fund?.months_coverage || 0 }} мес.
+            </span><br>
+
             💳 Долги (20%): {{ financialHealth.components?.debt_load?.score || 0 }}%<br>
-            <span class="tooltip-sub">Платежи: {{ formatMoney(financialHealth.components?.debt_load?.monthly_payments) }}</span><br>
-            💰 Сбережения (20%): {{ financialHealth.components?.savings_rate?.score || 0 }}%<br>
-            <span class="tooltip-sub">Сэкономлено: {{ formatMoney(financialHealth.components?.savings_rate?.saved_amount) }}</span><br>
+            <span class="tooltip-sub">
+              Платежи: {{ formatMoney(financialHealth.components?.debt_load?.monthly_payments) }}
+            </span><br>
+
+            💰 Норма сбережений (20%): {{ financialHealth.components?.savings_rate?.score || 0 }}%<br>
+            <span class="tooltip-sub">
+              Сэкономлено: {{ formatMoney(financialHealth.components?.savings_rate?.saved_amount) }}
+            </span><br>
+
             <span class="tooltip-score">⭐ Итог: {{ financialHealth.score }}/100</span>
           </div>
         </div>
@@ -126,11 +142,6 @@
           </div>
           <div class="category-footer">
             <span class="category-percent">{{ getCategoryPercent(cat.total) }}%</span>
-            <span v-if="cat.budget_limit > 0" class="category-limit" :class="getBudgetStatusClass(cat)">
-              Лимит: {{ formatMoney(cat.budget_limit) }}
-              <span class="limit-indicator" :class="cat.budget_status">●</span>
-            </span>
-            <span v-else class="category-limit no-limit">Лимит не установлен</span>
           </div>
         </div>
       </div>
@@ -222,12 +233,6 @@
             </div>
             <div class="cat-forecast">{{ formatMoney(cat.forecast) }}</div>
             <div class="cat-daily">{{ formatMoney(cat.daily_average) }}/день</div>
-            <!-- Рекомендация по лимиту (если есть) -->
-            <div v-if="cat.recommendation" class="cat-recommendation" :class="cat.recommendation.action">
-              <span v-if="cat.recommendation.action === 'set'">➕ Рекомендуемый лимит: {{ formatMoney(cat.recommendation.recommended_limit) }}</span>
-              <span v-else-if="cat.recommendation.action === 'increase'">📈 Увеличить лимит до {{ formatMoney(cat.recommendation.recommended_limit) }}</span>
-              <span v-else-if="cat.recommendation.action === 'decrease'">📉 Уменьшить лимит до {{ formatMoney(cat.recommendation.recommended_limit) }}</span>
-            </div>
           </div>
         </div>
       </div>
@@ -304,13 +309,6 @@ export default {
       if (trend === 'growth') return 'Рост'
       if (trend === 'decline') return 'Снижение'
       return 'Стабильно'
-    }
-
-    const getBudgetStatusClass = (category) => {
-      if (category.budget_status === 'good') return 'status-good'
-      if (category.budget_status === 'warning') return 'status-warning'
-      if (category.budget_status === 'critical') return 'status-critical'
-      return ''
     }
 
     // ==================== ВЫЧИСЛЯЕМЫЕ СВОЙСТВА ====================
@@ -433,7 +431,6 @@ export default {
       formatChange,
       getTrendIcon,
       getTrendText,
-      getBudgetStatusClass,
       getCategoryPercent,
       fetchAnalytics
     }
