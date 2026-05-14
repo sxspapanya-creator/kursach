@@ -453,26 +453,40 @@ class AnalyticsController extends Controller
     private function forecastRemainingCurrentMonth(int $userId): array
     {
         $now = Carbon::now();
-        $daysPassed = $now->day - 1;
-        $daysTotal = $now->daysInMonth;
-        if ($daysPassed <= 0) $daysPassed = 1;
+        $today = (int)$now->day;
+        $daysTotal = (int)$now->daysInMonth;
 
+        // ========== ОСНОВНОЙ РАСЧЕТ ==========
+        // Количество оставшихся дней (НАЧИНАЯ С ЗАВТРАШНЕГО ДНЯ)
+        $daysLeft = $daysTotal - $today;
+        if ($daysLeft < 0) $daysLeft = 0;
+
+        // Количество пройденных дней (ВКЛЮЧАЯ СЕГОДНЯШНИЙ)
+        $daysSpent = $today;
+        if ($daysSpent <= 0) $daysSpent = 1;
+
+        // ========== ФАКТИЧЕСКИЕ ДАННЫЕ ==========
         $actualSpent = $this->getMonthlyExpenseAmount($userId, $now->year, $now->month);
-        $currentDailyRate = $actualSpent / $daysPassed;
+        $currentDailyRate = $actualSpent / $daysSpent;
 
+        // Данные за прошлый месяц
         $lastMonth = $now->copy()->subMonth();
         $lastMonthTotal = $this->getMonthlyExpenseAmount($userId, $lastMonth->year, $lastMonth->month);
         $lastMonthDailyRate = $lastMonthTotal / $lastMonth->daysInMonth;
 
-        $currentWeight = min(0.8, $daysPassed / $daysTotal);
+        // Взвешенная дневная ставка
+        $currentWeight = min(0.8, $daysSpent / $daysTotal);
         $weightedDailyRate = ($currentDailyRate * $currentWeight) + ($lastMonthDailyRate * (1 - $currentWeight));
 
-        $daysLeft = $daysTotal - $daysPassed;
+        // Прогноз на оставшиеся дни (только на будующие дни, начиная с завтра)
         $forecastRemaining = $weightedDailyRate * $daysLeft;
 
+        // ========== ПОДНЕВНОЙ ПРОГНОЗ (НАЧИНАЯ С ЗАВТРА) ==========
         $dayFactors = $this->calculateDayOfWeekFactors($userId);
         $dailyBreakdown = [];
-        $currentDate = $now->copy();
+
+        // ВАЖНО: начинаем с ЗАВТРАШНЕГО ДНЯ!
+        $currentDate = $now->copy()->addDay();
 
         for ($i = 0; $i < $daysLeft; $i++) {
             $dayOfWeek = $currentDate->dayOfWeek;
@@ -485,6 +499,7 @@ class AnalyticsController extends Controller
             $currentDate->addDay();
         }
 
+        // ========== ВОЗВРАТ ==========
         return [
             'days_left' => $daysLeft,
             'already_spent' => round($actualSpent, 2),
@@ -693,34 +708,51 @@ class AnalyticsController extends Controller
 
     private function calculateConfidence(int $userId): array
     {
-        $oldest = Transaction::where('user_id', $userId)
-            ->where('is_anomaly', false)
-            ->orderBy('date', 'asc')
-            ->first();
-
-        if (!$oldest) return ['percent' => 0, 'level' => 'low', 'text' => 'Нет данных'];
-
-        $monthsOfData = Carbon::parse($oldest->date)->diffInMonths(Carbon::now());
-        $monthsScore = min(100, 100 * (1 - 1 / sqrt(max($monthsOfData, 3))));
-
+        // Получаем расходы за последние 12 месяцев (или сколько есть)
         $monthlyExpenses = $this->getCompleteMonthsExpensesArray($userId, 12);
         $values = array_filter($monthlyExpenses, fn($v) => $v > 0);
         $n = count($values);
 
-        if ($n < 3) $stabilityScore = 0;
-        else {
-            $mean = array_sum($values) / $n;
-            $variance = array_sum(array_map(fn($x) => pow($x - $mean, 2), $values)) / $n;
-            $cv = sqrt($variance) / $mean;
-            $stabilityScore = 100 * exp(-2 * $cv);
+        // Если нет данных или меньше 3 месяцев
+        if ($n < 3) {
+            return [
+                'cv' => null,
+                'cv_percent' => null,
+                'level' => 'low',
+                'text' => 'Недостаточно данных',
+                'confidence' => 0
+            ];
         }
 
-        $totalScore = ($monthsScore * 0.5) + ($stabilityScore * 0.5);
-        $totalScore = round(min(100, max(0, $totalScore)));
+        // Расчет коэффициента вариации (CV)
+        $mean = array_sum($values) / $n;
+        $variance = array_sum(array_map(fn($x) => pow($x - $mean, 2), $values)) / $n;
+        $stdDeviation = sqrt($variance);
+        $cv = $stdDeviation / $mean;
+        $cvPercent = round($cv * 100, 1);
 
-        if ($totalScore >= 70) return ['percent' => $totalScore, 'level' => 'high', 'text' => 'Высокая надежность'];
-        if ($totalScore >= 45) return ['percent' => $totalScore, 'level' => 'medium', 'text' => 'Средняя надежность'];
-        return ['percent' => $totalScore, 'level' => 'low', 'text' => 'Низкая надежность'];
+        // Определяем уровень стабильности
+        if ($cv < 0.15) {
+            $level = 'high';
+            $text = 'Стабильные расходы';
+        } elseif ($cv < 0.30) {
+            $level = 'medium';
+            $text = 'Умеренные колебания';
+        } elseif ($cv < 0.50) {
+            $level = 'low';
+            $text = 'Нестабильные расходы';
+        } else {
+            $level = 'low';
+            $text = 'Очень нестабильные расходы';
+        }
+
+        return [
+            'cv' => round($cv, 3),
+            'cv_percent' => $cvPercent,
+            'level' => $level,
+            'text' => $text,
+            'confidence' => 0 // не используем
+        ];
     }
 
     // ==================== API ENDPOINTS ====================
@@ -974,6 +1006,9 @@ class AnalyticsController extends Controller
             $secondMonthTrendFactor = $trend * $trend; // Усиленный тренд для второго месяца
             $secondMonthCategoryForecasts = $this->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $secondMonthTrendFactor);
 
+            // Расчет коэффициента вариации (CV)
+            $cvData = $this->calculateConfidence($userId);
+
             return response()->json([
                 'status' => 'success',
                 'data' => [
@@ -981,9 +1016,11 @@ class AnalyticsController extends Controller
                     'forecast_available' => true,
                     'anomalies_list' => $anomaliesList,
                     'model' => $strategy->getName(),
-                    'confidence' => ($conf = $this->calculateConfidence($userId))['percent'],
-                    'confidence_level' => $conf['level'],
-                    'confidence_text' => $conf['text'],
+                    // Коэффициент вариации (CV)
+                    'cv' => $cvData['cv'],
+                    'cv_percent' => $cvData['cv_percent'],
+                    'cv_level' => $cvData['level'],
+                    'cv_text' => $cvData['text'],
                     'complete_months_used' => $monthsCount,
                     'remaining_current_month' => $remainingMonth,
                     'next_month' => $nextMonthSummary,

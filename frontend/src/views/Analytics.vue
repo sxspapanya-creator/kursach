@@ -142,7 +142,7 @@
     </div>
 
     <!-- Аномалии -->
-    <div v-if="detectedAnomalies.length > 0" class="anomalies-section">
+    <div class="anomalies-section">
       <div class="section-header">
         <h2>⚠️ Выявленные аномалии</h2>
         <span class="anomalies-count">Найдено: {{ detectedAnomalies.length }}</span>
@@ -167,28 +167,30 @@
               <input type="checkbox" :checked="getLocalAnomalyStatus(anomaly)" @change="toggleLocalAnomalyStatus(anomaly)">
             </td>
             <td class="description-cell">{{ anomaly.description || '—' }}</td>
-            <td>{{ formatDate(anomaly.date) }}</td>
-            <td>
-                <span class="category-badge" :style="{ backgroundColor: anomaly.category_color + '20', color: anomaly.category_color }">
-                  {{ anomaly.category_name || 'Без категории' }}
-                </span>
+            <td class="date-cell">{{ formatDate(anomaly.date) }}</td>
+            <td class="category-cell">
+            <span class="category-badge" :style="{ backgroundColor: anomaly.category_color + '20', color: anomaly.category_color }">
+              {{ anomaly.category_name || 'Без категории' }}
+            </span>
             </td>
-            <td>
-                <span class="payment-method-badge" :class="anomaly.payment_method">
-                  {{ getPaymentMethodText(anomaly.payment_method) }}
-                </span>
+            <td class="payment-cell">
+            <span class="payment-method-badge" :class="anomaly.payment_method">
+              {{ getPaymentMethodText(anomaly.payment_method) }}
+            </span>
             </td>
             <td class="amount-cell">
-                <span class="original-amount">
-                  {{ formatMoneyAmount(anomaly.original_amount || anomaly.amount) }}
-                  {{ anomaly.currency_code || 'BYN' }}
-                </span>
+            <span class="original-amount">
+              {{ formatMoneyAmount(anomaly.original_amount || anomaly.amount) }}
+              {{ anomaly.currency_code || 'BYN' }}
+            </span>
             </td>
             <td class="rate-cell">
               <span v-if="anomaly.exchange_rate && anomaly.exchange_rate !== 1">{{ formatExchangeRate(anomaly.exchange_rate) }}</span>
               <span v-else class="rate-na">—</span>
             </td>
-            <td class="byn-cell"><strong>{{ formatMoney(anomaly.amount_in_byn || anomaly.amount) }}</strong></td>
+            <td class="byn-cell">
+              <strong>{{ formatMoney(anomaly.amount_in_byn || anomaly.amount) }}</strong>
+            </td>
           </tr>
           </tbody>
         </table>
@@ -289,25 +291,24 @@
         </div>
 
         <div class="quality-card">
-          <span class="quality-label">Надежность</span>
-          <span class="quality-value" :class="forecastData.confidence_level">{{ forecastData.confidence }}%</span>
-          <span class="quality-desc">{{ forecastData.confidence_text }}</span>
+          <span class="quality-label">Вариация (CV)</span>
+          <span class="quality-value" :class="getCvClass(forecastData.cv_percent)">
+            <template v-if="forecastData.cv_percent !== null && forecastData.cv_percent !== undefined">
+              {{ forecastData.cv_percent }}%
+            </template>
+            <template v-else>
+              —
+            </template>
+          </span>
+          <span class="quality-desc">{{ forecastData.cv_text || 'Нет данных' }}</span>
           <div class="card-tooltip">
-            <strong>🔮 Как рассчитывается надежность?</strong><br>
+            <strong>📊 Что такое коэффициент вариации (CV)?</strong><br>
             <span class="tooltip-sub">
-              Надежность прогноза зависит от двух факторов:<br><br>
-              <strong>1. Количество данных (50%):</strong><br>
-              • Чем больше месяцев истории, тем выше надежность<br>
-              • Максимум 100% при &gt;12 месяцах<br><br>
-              <strong>2. Стабильность расходов (50%):</strong><br>
-              • Насколько расходы отличаются от месяца к месяцу<br>
-              • Коэффициент вариации (CV) — чем он ниже, тем стабильнее<br><br>
-              <strong>Итоговая формула:</strong><br>
-              Надежность = 0.5 × Score(месяцы) + 0.5 × Score(стабильность)<br><br>
-              <strong>Интерпретация:</strong><br>
-              • ≥70% — высокая надежность<br>
-              • 45-69% — средняя надежность<br>
-              • &lt;45% — низкая надежность
+              Показывает, насколько расходы отличаются от месяца к месяцу.<br><br>
+              <strong>Формула:</strong><br>
+              CV = σ / μ × 100%<br>
+              где σ — стандартное отклонение, μ — среднее значение<br><br>
+              <strong>Чем ниже CV, тем точнее будет прогноз!</strong>
             </span>
           </div>
         </div>
@@ -496,6 +497,14 @@ export default {
       return 'низкая точность'
     }
 
+    const getCvClass = (cvPercent) => {
+      if (cvPercent === null || cvPercent === undefined) return 'bad'
+      if (cvPercent < 15) return 'excellent'
+      if (cvPercent < 30) return 'good'
+      if (cvPercent < 50) return 'normal'
+      return 'bad'
+    }
+
     const getShortDay = (dayOfWeek) => {
       const short = { 'Понедельник': 'Пн', 'Вторник': 'Вт', 'Среда': 'Ср', 'Четверг': 'Чт', 'Пятница': 'Пт', 'Суббота': 'Сб', 'Воскресенье': 'Вс' }
       return short[dayOfWeek] || dayOfWeek?.slice(0, 2)
@@ -504,70 +513,175 @@ export default {
     const getMethodDescription = (method) => {
       const descriptions = {
         'SimpleExtrapolation': `
-          <strong>Для минимальных данных (3-6 месяцев)</strong><br><br>
-          <strong>Применяется когда:</strong> мало истории (3-6 месяцев)<br><br>
-          <strong>Как работает:</strong><br>
-          1. Берет последний известный расход<br>
-          2. Рассчитывает среднее изменение за весь период<br>
-          3. Ограничивает изменение: максимум +20%, минимум -15%<br>
-          4. Экстраполирует тренд на будущие периоды<br><br>
-          <strong>Формула:</strong><br>
-          Прогноз = Последнее_значение + Среднее_изменение × Шаг<br><br>
-          <strong>Ограничения:</strong><br>
-          • Не учитывает сезонность<br>
-          • Не чувствителен к резким скачкам<br>
-          • Работает только для коротких периодов
-        `,
+    <strong> Линейная экстраполяция</strong><br><br>
+
+    <strong> Как работает?</strong><br>
+    1. Берет <strong>первый завершенный месяц</strong> и <strong>последний завершенный месяц</strong> из истории<br>
+    2. Считает, на сколько в среднем менялись расходы за месяц:<br>
+       <code>Среднее_изменение = (Последний_месяц - Первый_месяц) / (Количество_месяцев - 1) (не учитывая текущий неполный месяц)</code><br>
+    3. Ограничивает изменение (не больше +20% и не меньше -15% за месяц)<br>
+    4. Продлевает (экстраполирует) этот тренд на будущие месяцы<br><br>
+
+    <strong> Формула прогноза:</strong><br>
+    <code>y = a + b × x</code><br>
+    где:<br>
+    • <strong>y</strong> — прогнозируемые расходы<br>
+    • <strong>a</strong> — последний известный месяц<br>
+    • <strong>b</strong> — среднее изменение за месяц<br>
+    • <strong>x</strong> — шаг прогноза (1, 2, 3...)<br>
+
+    <strong> Важные ограничения:</strong><br>
+    • Максимальный рост за месяц: <strong>+20%</strong><br>
+    • Максимальное падение за месяц: <strong>-15%</strong><br>
+    • Минимальный прогноз: <strong>30% от последнего месяца</strong> (защита от нуля)<br>
+    • Не учитывает сезонные колебания (новый год, лето и т.д.)<br>
+    • Не чувствителен к резким скачкам в середине периода<br>
+    • Работает только для краткосрочного прогноза (1-2 месяца)<br><br>
+  `,
         'LinearRegression': `
-          <strong>Для стабильных данных (7-14 месяцев)</strong><br><br>
-          <strong>Применяется когда:</strong> 7-14 месяцев данных, есть линейный тренд<br><br>
-          <strong>Как работает:</strong><br>
-          1. Строит линию регрессии через все точки данных<br>
-          2. Находит оптимальную прямую (метод наименьших квадратов)<br>
-          3. Экстраполирует линию на будущие периоды<br><br>
-          <strong>Формула:</strong><br>
-          y = a + b × x, где:<br>
-          • b = (n×Σxy - Σx×Σy) / (n×Σx² - (Σx)²) — коэффициент наклона<br>
-          • a = (Σy - b×Σx) / n — точка пересечения<br><br>
-          <strong>Ограничения:</strong><br>
-          • Предполагает линейный тренд<br>
-          • Чувствителен к выбросам<br>
-          • Не учитывает сезонность
-        `,
+  <strong> Линейная регрессия </strong><br><br>
+
+  <strong> Как работает?</strong><br>
+  1. Строит оптимальную прямую линию тренда через ВСЕ точки данных<br>
+  2. Использует <strong>метод наименьших квадратов</strong> — прямая максимально близка ко всем точкам<br>
+  3. Сглаживает случайные колебания (шум) в данных<br>
+  4. Продлевает (экстраполирует) этот тренд на будущие месяцы<br><br>
+
+  <strong> Формула прогноза (метод наименьших квадратов):</strong><br>
+  <code>y = a + b × x (зависимость расходов от времени)</code><br>
+  где:<br>
+  • <strong>y</strong> — прогнозируемые расходы<br>
+  • <strong>a</strong> — точка пересечения с осью Y (intercept)<br>
+  • <strong>b</strong> — коэффициент наклона (slope)<br>
+  • <strong>x</strong> — порядковый номер месяца (0, 1, 2, 3...)<br><br>
+
+  <strong> Как рассчитываются коэффициенты?</strong><br>
+  <code>b = (n × Σxy - Σx × Σy) / (n × Σx² - (Σx)²)</code><br>
+  <code>a = (Σy - b × Σx) / n</code><br>
+  где:<br>
+  • <strong>n</strong> — количество месяцев<br>
+  • <strong>Σxy</strong> — сумма произведений x и y<br>
+  • <strong>Σy</strong> — сумма расходов<br>
+
+  <strong> Пример работы:</strong><br>
+  Данные за 5 месяцев: 1000, 1150, 1180, 1320, 1400 BYN<br><br>
+
+  <strong>Расчет коэффициентов:</strong><br>
+  • Σy = 1000+1150+1180+1320+1400 = 6050<br>
+  • Σxy = 0×1000 + 1×1150 + 2×1180 + 3×1320 + 4×1400 = 13070<br>
+  • n = 5<br><br>
+
+  <code>b = (5×13070 - 10×6050) / (5×30 - 10²) = (65350 - 60500) / (150 - 100) = 4850 / 50 = 97</code><br>
+  <code>a = (6050 - 97×10) / 5 = (6050 - 970) / 5 = 5080 / 5 = 1016</code><br><br>
+
+  <strong>Уравнение прямой:</strong> <code>y = 1016 + 97 × x</code><br>
+  <strong>Прогноз на следующий месяц (x=5):</strong> 1016 + 97×5 = <strong>1501 BYN</strong><br><br>
+
+  <strong> Важные ограничения:</strong><br>
+  • Максимальный рост: <strong>не более чем ×2 (200%) от последнего месяца</strong><br>
+  • Максимальное падение: <strong>не менее 30% от последнего месяца</strong><br>
+  • Не учитывает сезонные колебания (новый год, лето и т.д.)<br>
+`,
         'DoubleExponentialSmoothing': `
-          <strong>Для трендовых данных (15-23 месяца)</strong><br><br>
-          <strong>Применяется когда:</strong> 15-23 месяцев данных, есть тренд, но нет сезонности<br><br>
-          <strong>Как работает:</strong><br>
-          1. Двойное экспоненциальное сглаживание (метод Хольта)<br>
-          2. Отслеживает уровень и тренд одновременно<br>
-          3. Параметры α (альфа) и β (бета) оптимизируются автоматически<br><br>
-          <strong>Формула:</strong><br>
-          • Уровень: Lₜ = α×Yₜ + (1-α)×(Lₜ₋₁ + Tₜ₋₁)<br>
-          • Тренд: Tₜ = β×(Lₜ - Lₜ₋₁) + (1-β)×Tₜ₋₁<br>
-          • Прогноз: Fₜ₊ₖ = Lₜ + k×Tₜ<br><br>
-          <strong>Преимущества:</strong><br>
-          • Адаптируется к изменениям тренда<br>
-          • Более свежие данные имеют больший вес<br>
-          • Не требует сезонности
-        `,
+  <strong> Двойное экспоненциальное сглаживание или Метод Хольта)</strong><br><br>
+
+  <strong> Как работает?</strong><br>
+  1. Отслеживает два компонента: <strong>уровень</strong> (сглаженное значение) и <strong>тренд</strong> (скорость изменения)<br>
+  2. Каждый месяц обновляет оба компонента с учетом новых данных<br>
+  3. Чем свежее данные, тем больше их влияние (экспоненциальное затухание)<br>
+  4. Прогноз = текущий уровень + тренд × количество шагов<br>
+  5. Параметры α (альфа) и β (бета) подбираются автоматически<br><br>
+
+  <strong>📐 Формулы (метод Хольта):</strong><br>
+  <code>Уровень: Lₜ = α × Yₜ + (1-α) × (Lₜ₋₁ + Tₜ₋₁)</code><br>
+  <code>Тренд: Tₜ = β × (Lₜ - Lₜ₋₁) + (1-β) × Tₜ₋₁</code><br>
+  <code>Прогноз: Fₜ₊ₖ = Lₜ + k × Tₜ</code><br><br>
+
+  где:<br>
+  • <strong>Lₜ</strong> — сглаженный уровень в месяце t<br>
+  • <strong>Tₜ</strong> — тренд (насколько меняются расходы за месяц)<br>
+  • <strong>Yₜ</strong> — фактические расходы в месяце t<br>
+  • <strong>α</strong> — коэффициент сглаживания уровня (0.1-0.8)<br>
+  • <strong>β</strong> — коэффициент сглаживания тренда (0.05-0.5)<br>
+  • <strong>k</strong> — шаг прогноза (1, 2, 3...)<br><br>
+
+  <strong> Как подбираются α и β?</strong><br>
+  Алгоритм перебирает разные комбинации и выбирает те, которые дают наименьшую ошибку:<br>
+
+  <strong> Пример работы:</strong><br>
+  Расходы за 4 месяца: 1000, 1100, 1300, 1600 BYN<br>
+  Подобранные параметры: α = 0.5, β = 0.3<br><br>
+
+  <strong> Начальные значения (через линейную регрессию):</strong><br>
+  L₀ = 850, T₀ = 150<br><br>
+
+  <strong> Пошаговое сглаживание:</strong><br>
+  • Месяц 1 (факт 1100): L₁ = 0.5×1100 + 0.5×(850+150) = 1050, T₁ = 165<br>
+  • Месяц 2 (факт 1300): L₂ = 0.5×1300 + 0.5×(1050+165) = 1257.5, T₂ = 177.75<br>
+  • Месяц 3 (факт 1600): L₃ = 0.5×1600 + 0.5×(1257.5+177.75) = 1517.6, T₃ = 202.4<br><br>
+
+  <strong> Прогноз на следующий месяц:</strong><br>
+  F = 1517.6 + 1 × 202.4 = <strong>1720 BYN</strong><br><br>
+
+  <strong>Важные ограничения:</strong><br>
+  • Максимальный рост: <strong>не более чем ×2 (200%) от последнего месяца</strong><br>
+  • Максимальное падение: <strong>не менее 30% от последнего месяца</strong><br>
+  • Не учитывает сезонные колебания (новый год, лето и т.д.)<br>
+
+  <strong> Преимущества перед LinearRegression:</strong><br>
+  • Адаптируется к изменению тренда (может ускоряться или замедляться)<br>
+  • Более свежие данные имеют больший вес<br>
+  • Лучше работает при нелинейных изменениях<br>
+  • Дает более точный прогноз при волатильных данных<br><br>
+`,
         'HoltWinters': `
-          <strong>Для сезонных данных (24+ месяца)</strong><br><br>
-          <strong>Применяется когда:</strong> 24+ месяцев данных, есть четкая сезонность (например, годовая)<br><br>
-          <strong>Как работает:</strong><br>
-          1. Тройное экспоненциальное сглаживание<br>
-          2. Учитывает уровень, тренд и сезонность<br>
-          3. Параметры α, β, γ оптимизируются автоматически<br>
-          4. Сезонный период = 12 месяцев<br><br>
-          <strong>Формула:</strong><br>
-          • Уровень: Lₜ = α×(Yₜ/Sₜ₋ₚ) + (1-α)×(Lₜ₋₁ + Tₜ₋₁)<br>
-          • Тренд: Tₜ = β×(Lₜ - Lₜ₋₁) + (1-β)×Tₜ₋₁<br>
-          • Сезонность: Sₜ = γ×(Yₜ/Lₜ) + (1-γ)×Sₜ₋ₚ<br>
-          • Прогноз: Fₜ₊ₖ = (Lₜ + k×Tₜ) × Sₜ₊ₖ₋ₚ<br><br>
-          <strong>Преимущества:</strong><br>
-          • Учитывает сезонные колебания<br>
-          • Самый точный метод для сезонных данных<br>
-          • Адаптируется к изменениям тренда и сезонности
-        `
+  <strong> Тройное экспоненциальное сглаживание</strong><br><br>
+
+  <strong> Как работает?</strong><br>
+  1. Отслеживает <strong>три компонента</strong>: уровень, тренд и сезонность<br>
+  2. Сезонный период = <strong>12 месяцев</strong> (годовая сезонность)<br>
+  3. Каждый месяц обновляет все три компонента с учетом новых данных<br>
+  4. Чем свежее данные, тем больше их влияние<br>
+  5. Прогноз = (уровень + тренд × шаг) × сезонный коэффициент<br>
+  6. Параметры α, β, γ подбираются автоматически<br><br>
+
+  <strong> Формулы (метод Хольта-Уинтерса):</strong><br>
+  <code>Уровень: Lₜ = α × (Yₜ / Sₜ₋ₚ) + (1-α) × (Lₜ₋₁ + Tₜ₋₁)</code><br>
+  <code>Тренд: Tₜ = β × (Lₜ - Lₜ₋₁) + (1-β) × Tₜ₋₁</code><br>
+  <code>Сезонность: Sₜ = γ × (Yₜ / Lₜ) + (1-γ) × Sₜ₋ₚ</code><br>
+  <code>Прогноз: Fₜ₊ₖ = (Lₜ + k × Tₜ) × Sₜ₊ₖ₋ₚ</code><br><br>
+
+  где:<br>
+  • <strong>Lₜ</strong> — сглаженный уровень в месяце t<br>
+  • <strong>Tₜ</strong> — тренд (насколько меняются расходы за месяц)<br>
+  • <strong>Sₜ</strong> — сезонный коэффициент (например, декабрь = 1.5, июль = 0.7)<br>
+  • <strong>Yₜ</strong> — фактические расходы в месяце t<br>
+  • <strong>α</strong> (альфа) — коэффициент сглаживания уровня (0.1-0.9)<br>
+  • <strong>β</strong> (бета) — коэффициент сглаживания тренда (0.05-0.5)<br>
+  • <strong>γ</strong> (гамма) — коэффициент сглаживания сезонности (0.1-0.9)<br>
+  • <strong>p</strong> — сезонный период (12 месяцев)<br>
+  • <strong>k</strong> — шаг прогноза (1, 2, 3...)<br><br>
+
+  <strong> Как подбираются α, β и γ?</strong><br>
+  Алгоритм перебирает разные комбинации и выбирает те, которые дают наименьшую ошибку MAPE:<br>
+
+  <strong> Пример работы:</strong><br>
+  Данные за 24 месяца с явной сезонностью:<br><br>
+
+  <strong> Вычисление сезонных коэффициентов:</strong><br>
+
+  <strong>Базовый уровень и тренд:</strong><br>
+  • Уровень (L) = 1000 BYN<br>
+  • Тренд (T) = +10 BYN в месяц (расходы растут)<br><br>
+
+  <strong>Прогноз на декабрь следующего года:</strong><br>
+  Без сезонности: 1000 + 10×12 = 1120 BYN<br>
+  С учетом сезонности: <strong>1120 × 1.5 (пример) = 1680 BYN</strong><br><br>
+
+  <strong>Прогноз на июль следующего года:</strong><br>
+  Без сезонности: 1000 + 10×6 = 1060 BYN<br>
+  С учетом сезонности: <strong>1060 × 1.15 ≈ 1219 BYN</strong><br><br>
+`
       }
       return descriptions[method] || `
         <strong>Метод прогнозирования</strong><br>
@@ -677,7 +791,7 @@ export default {
       includeAnomalies, showResultModal, resultModal, processedTotals, categorySpending, financialHealth, balanceClass,
       currentMonthName, periodLabel, localAnomaliesTotalAmount, hasLocalChanges, maxDailyForecast, formatMoney,
       formatMoneyAmount, formatExchangeRate, formatDate, formatDay, formatChange, getTrendIcon, getTrendText,
-      getPaymentMethodText, getMapeClass, getMapeDesc, getShortDay, getMethodDescription, getBarHeight, getCategoryPercent,
+      getPaymentMethodText, getMapeClass, getMapeDesc, getCvClass, getShortDay, getMethodDescription, getBarHeight, getCategoryPercent,
       getLocalAnomalyStatus, hasLocalChange, toggleLocalAnomalyStatus, resetLocalChanges, applyAnomalyChanges, fetchAnalytics
     }
   }
@@ -685,7 +799,6 @@ export default {
 </script>
 
 <style scoped>
-@import '../css/analytics.css';
 @import '../css/analytics.css';
 
 /* Глобальные стили для страницы */
