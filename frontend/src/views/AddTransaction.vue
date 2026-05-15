@@ -106,7 +106,6 @@
                 <line x1="12" y1="16" x2="12.01" y2="16"/>
               </svg>
             </div>
-            <p>Загрузка валют...</p>
           </div>
 
           <div v-else class="currencies-grid">
@@ -265,70 +264,43 @@
 
 <script>
 import { onMounted } from 'vue'
-import { useTransactionForm } from '../composables/useTransactionForm'
+import { useTransactions } from '../composables/useTransactions.js'
 import { useCurrencies } from '../composables/useCurrencies'
 
 export default {
   name: 'AddTransaction',
   setup() {
-    const {
-      form,
-      loading,
-      error,
-      amountError,
-      dateError,
-      currencies,
-      paymentMethods,
-      minDate,
-      maxDate,
-      currentCurrencySymbol,
-      filteredCategories,
-      isFormValid,
-      isDateUnavailable,
-      validateAmount,
-      toggleCategory,
-      submitTransaction,
-      selectCurrency,
-      setTodayDate,
-      validateDate,
-      loadInitialData
-    } = useTransactionForm()
-
+    const transactionsCore = useTransactions()
     const { getCurrencyFlag, formatRate } = useCurrencies()
 
     onMounted(() => {
-      loadInitialData()
+      transactionsCore.init()
     })
 
     return {
-      // Состояние формы
-      form,
-      loading,
-      error,
-      amountError,
-      dateError,
+      form: transactionsCore.form,
+      loading: transactionsCore.loading,
+      error: transactionsCore.error,
+      amountError: transactionsCore.amountError,
+      dateError: transactionsCore.dateError,
+      currencies: transactionsCore.currencies,
+      paymentMethods: transactionsCore.paymentMethods,
+      minDate: transactionsCore.minDate,
+      maxDate: transactionsCore.maxDate,
+      currentCurrencySymbol: transactionsCore.currentCurrencySymbol,
+      filteredCategories: transactionsCore.filteredCategories,
+      isFormValid: transactionsCore.isFormValid,
+      isDateUnavailable: transactionsCore.isDateUnavailable,
 
-      // Данные
-      currencies,
-      paymentMethods,
-      minDate,
-      maxDate,
+      validateAmount: transactionsCore.validateAmount,
+      toggleCategory: transactionsCore.toggleCategory,
+      submitTransaction: transactionsCore.submitTransaction,
+      selectCurrency: transactionsCore.selectCurrency,
+      setTodayDate: transactionsCore.setTodayDate,
+      validateDate: transactionsCore.validateDate,
 
-      // Вычисляемые свойства
-      currentCurrencySymbol,
-      filteredCategories,
-      isFormValid,
-      isDateUnavailable,
-
-      // Методы
       getCurrencyFlag,
-      formatRate,
-      validateAmount,
-      toggleCategory,
-      submitTransaction,
-      selectCurrency,
-      setTodayDate,
-      validateDate
+      formatRate
     }
   }
 }

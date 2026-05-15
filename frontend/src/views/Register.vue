@@ -114,12 +114,12 @@
 </template>
 
 <script>
-import { useRegisterSubmit } from '../composables/useRegisterSubmit'
+import { useRegister } from '../composables/useRegister.js'
 
 export default {
   name: 'Register',
   setup() {
-    return useRegisterSubmit()
+    return useRegister()
   }
 }
 </script>

@@ -6,15 +6,139 @@ export function useCategories() {
     const loading = ref(false)
     const error = ref('')
 
-    const currentMonth = new Date().getMonth() + 1
-    const currentYear = new Date().getFullYear()
+    const activeTab = ref('all') // all, income, expense
+
+    const showModal = ref(false)
+    const isEditing = ref(false)
+    const editingId = ref(null)
+    const hasTransactions = ref(false)
+    const formErrors = ref({})
 
     const colorOptions = [
         '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
         '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#64748b'
     ]
 
-    // Базовые методы (для других компонентов)
+    const formData = ref({
+        name: '',
+        type: 'expense',
+        color: colorOptions[3]
+    })
+
+    const currentMonth = new Date().getMonth() + 1
+    const currentYear = new Date().getFullYear()
+
+    const incomeCategories = computed(() =>
+        categories.value.filter(cat => cat.type === 'income')
+            .sort((a, b) => a.name.localeCompare(b.name))
+    )
+
+    const expenseCategories = computed(() =>
+        categories.value.filter(cat => cat.type === 'expense')
+            .sort((a, b) => a.name.localeCompare(b.name))
+    )
+
+    const totalCategories = computed(() => categories.value.length)
+
+    const displayedCategories = computed(() => {
+        if (activeTab.value === 'income') return incomeCategories.value
+        if (activeTab.value === 'expense') return expenseCategories.value
+        return [...incomeCategories.value, ...expenseCategories.value]
+    })
+
+    const displayedCategoriesWithMonthData = computed(() =>
+        displayedCategories.value.map(category => ({
+            ...category,
+            total_amount: category.total_amount || 0,
+            transaction_count: category.transaction_count || 0,
+            all_time_count: category.all_time_count ?? 0,
+            currency_stats: category.currency_stats || [],
+            last_transaction_date: category.last_transaction_date
+        }))
+    )
+
+    const setTab = (tab) => {
+        activeTab.value = tab
+    }
+
+    const getFilteredCategories = (type) => {
+        return categories.value
+            .filter(cat => cat.type === type)
+            .sort((a, b) => a.name.localeCompare(b.name))
+    }
+
+    const getCategoryById = (id) => {
+        return categories.value.find(c => c.id === id)
+    }
+
+    const formatMoney = (amount) => {
+        if (amount == null || isNaN(amount)) return '0 Br'
+        return new Intl.NumberFormat('ru-RU', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(amount) + ' Br'
+    }
+
+    const formatMoneyAmount = (amount) => {
+        if (amount == null || isNaN(amount)) return '0'
+        return new Intl.NumberFormat('ru-RU', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(amount)
+    }
+
+    const formatDate = (dateString) => {
+        if (!dateString) return 'Нет транзакций'
+        const date = new Date(dateString)
+        return date.toLocaleDateString('ru-RU', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+        })
+    }
+
+    const openAddForm = (type = 'expense') => {
+        isEditing.value = false
+        editingId.value = null
+        hasTransactions.value = false
+        formErrors.value = {}
+        formData.value = {
+            name: '',
+            type,
+            color: colorOptions[type === 'income' ? 1 : 3]
+        }
+        showModal.value = true
+    }
+
+    const openEditForm = (category) => {
+        isEditing.value = true
+        editingId.value = category.id
+        hasTransactions.value = (category.all_time_count || 0) > 0
+        formErrors.value = {}
+        formData.value = { ...category }
+        showModal.value = true
+    }
+
+    const closeModal = () => {
+        showModal.value = false
+        isEditing.value = false
+        editingId.value = null
+        formData.value = { name: '', type: 'expense', color: colorOptions[3] }
+        formErrors.value = {}
+    }
+
+    const validateForm = () => {
+        formErrors.value = {}
+
+        if (!formData.value.name.trim()) {
+            formErrors.value.name = 'Введите название категории'
+        } else if (formData.value.name.length > 50) {
+            formErrors.value.name = 'Название не должно превышать 50 символов'
+        }
+
+        return Object.keys(formErrors.value).length === 0
+    }
+
     const fetchCategories = async () => {
         try {
             loading.value = true
@@ -29,7 +153,6 @@ export function useCategories() {
         }
     }
 
-    // Загрузка категорий со статистикой (для страницы Categories)
     const fetchCategoriesWithStats = async (month = currentMonth, year = currentYear) => {
         try {
             loading.value = true
@@ -39,10 +162,8 @@ export function useCategories() {
                 params: { month, year }
             })
 
-            // Обработка ответа с бэка
             let data = response.data.data || response.data || []
 
-            // Если data не массив, а объект, пробуем взять data.data
             if (!Array.isArray(data) && data.data) {
                 data = data.data
             }
@@ -73,21 +194,6 @@ export function useCategories() {
         }
     }
 
-    const getFilteredCategories = (type) => {
-        return categories.value
-            .filter(cat => cat.type === type)
-            .sort((a, b) => a.name.localeCompare(b.name))
-    }
-
-    const getCategoryById = (id) => {
-        return categories.value.find(c => c.id === id)
-    }
-
-    const incomeCategories = computed(() => getFilteredCategories('income'))
-    const expenseCategories = computed(() => getFilteredCategories('expense'))
-    const totalCategories = computed(() => categories.value.length)
-
-    // CRUD операции
     const createCategory = async (data) => {
         const response = await axios.post('/api/categories', data)
         return response.data
@@ -103,22 +209,45 @@ export function useCategories() {
     }
 
     return {
-        // Состояние
+        // Состояния
         categories,
         loading,
         error,
+        activeTab,
+        showModal,
+        isEditing,
+        editingId,
+        hasTransactions,
+        formErrors,
+        formData,
         colorOptions,
 
         // Вычисляемые
         incomeCategories,
         expenseCategories,
         totalCategories,
+        displayedCategories,
+        displayedCategoriesWithMonthData,
 
-        // Методы
-        fetchCategories,
-        fetchCategoriesWithStats,
+        // Методы фильтрации
+        setTab,
         getFilteredCategories,
         getCategoryById,
+
+        // Методы форматирования
+        formatMoney,
+        formatMoneyAmount,
+        formatDate,
+
+        // Методы формы
+        openAddForm,
+        openEditForm,
+        closeModal,
+        validateForm,
+
+        // API методы
+        fetchCategories,
+        fetchCategoriesWithStats,
         createCategory,
         updateCategory,
         deleteCategory

@@ -274,7 +274,7 @@
 </template>
 
 <script>
-import { useEditTransaction } from '../composables/useEditTransaction'
+import { useTransactions } from '../composables/useTransactions'
 
 export default {
   name: 'EditTransaction',
@@ -285,7 +285,7 @@ export default {
     }
   },
   setup(props) {
-    return useEditTransaction(props)
+    return useTransactions(props)
   }
 }
 </script>

@@ -1,20 +1,17 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 
-// События для синхронизации
 const USER_UPDATED_EVENT = 'user-updated'
 const USER_LOGOUT_EVENT = 'user-logout'
 
 export function useAuth() {
     const router = useRouter()
 
-    // Состояние
     const isAuthenticated = ref(!!localStorage.getItem('user'))
     const userCacheVersion = ref(0)
 
-    // Вычисляемые свойства
     const userData = computed(() => {
-        userCacheVersion.value // Триггер для реактивности
+        userCacheVersion.value
         try {
             const userStr = localStorage.getItem('user')
             return userStr ? JSON.parse(userStr) : null
@@ -32,7 +29,6 @@ export function useAuth() {
     const userEmail = computed(() => userData.value?.email || '')
     const hasPremiumPlan = computed(() => userData.value?.plan_code === 'premium')
 
-    // Методы
     const bumpUserFromStorage = () => {
         const user = localStorage.getItem('user')
         isAuthenticated.value = !!user
@@ -53,14 +49,12 @@ export function useAuth() {
                 isAuthenticated.value = false
                 userCacheVersion.value++
             }
-        } catch (e) {
-            // Сетевые ошибки — не трогаем localStorage
-        }
+        } catch (e) {}
     }
 
     const logout = async () => {
         try {
-            const response = await fetch('/auth/logout', {
+            await fetch('/auth/logout', {
                 method: 'POST',
                 headers: {
                     'Accept': 'application/json',
@@ -68,26 +62,18 @@ export function useAuth() {
                 },
                 credentials: 'include'
             })
-
             localStorage.removeItem('user')
             isAuthenticated.value = false
-
             window.dispatchEvent(new CustomEvent(USER_LOGOUT_EVENT))
-
-            const message = response.ok ? 'Вы успешно вышли из системы' : 'Вы вышли из системы'
             router.push('/login')
-            return { success: true, message }
         } catch (error) {
-            console.error('Ошибка при выходе:', error)
             localStorage.removeItem('user')
             isAuthenticated.value = false
             window.dispatchEvent(new CustomEvent(USER_LOGOUT_EVENT))
             router.push('/login')
-            return { success: true, message: 'Вы вышли из системы' }
         }
     }
 
-    // Обновление пользователя (вызывается после логина)
     const updateUser = (user) => {
         localStorage.setItem('user', JSON.stringify(user))
         isAuthenticated.value = true
@@ -95,7 +81,6 @@ export function useAuth() {
         window.dispatchEvent(new CustomEvent(USER_UPDATED_EVENT))
     }
 
-    // Обработчики событий
     const handleUserUpdated = () => {
         bumpUserFromStorage()
     }
@@ -106,7 +91,6 @@ export function useAuth() {
         userCacheVersion.value++
     }
 
-    // Регистрация слушателей
     const registerEventListeners = () => {
         window.addEventListener(USER_UPDATED_EVENT, handleUserUpdated)
         window.addEventListener(USER_LOGOUT_EVENT, handleUserLogout)
@@ -117,21 +101,40 @@ export function useAuth() {
         window.removeEventListener(USER_LOGOUT_EVENT, handleUserLogout)
     }
 
+    const setupRouterGuards = (routerInstance) => {
+        routerInstance.beforeEach(async (to, from, next) => {
+            await syncWithApi()
+
+            const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
+            const requiresPremium = to.matched.some(record => record.meta.requiresPremium)
+
+            if (requiresAuth && !isAuthenticated.value) {
+                next('/login')
+                return
+            }
+
+            if (requiresPremium && !hasPremiumPlan.value) {
+                next('/')
+                return
+            }
+
+            next()
+        })
+    }
+
     return {
-        // Состояние
         isAuthenticated,
         userData,
         userInitials,
         userName,
         userEmail,
         hasPremiumPlan,
-
-        // Методы
         bumpUserFromStorage,
         syncWithApi,
         logout,
         updateUser,
         registerEventListeners,
-        unregisterEventListeners
+        unregisterEventListeners,
+        setupRouterGuards
     }
 }

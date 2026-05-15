@@ -113,12 +113,12 @@
 
           <div class="form-group">
             <label class="form-label">Новый пароль</label>
-            <input v-model="passwordForm.new_password" type="password" class="form-input" placeholder="Введите новый пароль" required minlength="6">
+            <input v-model="passwordForm.password" type="password" class="form-input" placeholder="Введите новый пароль" required minlength="6">
           </div>
 
           <div class="form-group">
             <label class="form-label">Подтверждение пароля</label>
-            <input v-model="passwordForm.new_password_confirmation" type="password" class="form-input" placeholder="Подтвердите новый пароль" required>
+            <input v-model="passwordForm.password_confirmation" type="password" class="form-input" placeholder="Подтвердите новый пароль" required>
           </div>
 
           <div class="form-actions">
@@ -228,12 +228,14 @@
 </template>
 
 <script>
-import { useProfile } from '../composables/useProfile'
+import { useProfile } from '../composables/useProfile.js'
 
 export default {
   name: 'Profile',
   setup() {
-    return useProfile()
+    const profile = useProfile()
+    profile.init() // Нужно вызвать init
+    return profile
   }
 }
 </script>

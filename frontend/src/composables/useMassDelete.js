@@ -1,123 +1,199 @@
-import { ref, onMounted } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
-import { useMassDeleteDate } from './useMassDeleteDate'
-import { useMassDeleteCategories } from './useMassDeleteCategories'
-import { useMassDeleteType } from './useMassDeleteType'
-import { useMassDeletePreview } from './useMassDeletePreview'
+import { useCurrencies } from './useCurrencies'
+import { useDateFormatter } from './useDateFormatter'
 
 export function useMassDelete() {
     const router = useRouter()
-    const activeTab = ref('date')
     const deleteFilters = ref({ type: '' })
 
-    const {
-        dateSelectionType,
-        dateRange,
-        singleDate,
-        dateFromError,
-        dateToError,
-        singleDateError,
-        minDate,
-        maxDate,
-        availableDates,
-        allDatesAllowed,
-        setDateRange,
-        isDateAvailable,
-        validateDateFrom,
-        validateDateTo,
-        validateSingleDate,
-        availableDatesHint,
-        isDateSelectionValid,
-        isDateSelectionUnavailable,
-        resetDateFilters
-    } = useMassDeleteDate()
+    // Используем существующие хуки для форматирования
+    const currenciesHook = useCurrencies()
+    const dateFormatter = useDateFormatter()
 
-    const {
-        allCategories,
-        selectedCategories,
-        categoryPeriod,
-        fetchCategories,
-        resetCategoryFilters
-    } = useMassDeleteCategories()
+    // ========== СОСТОЯНИЯ ==========
+    const activeTab = ref('date')
+    const loading = ref(false)
+    const error = ref('')
+    const showConfirmDialog = ref(false)
+    const deleting = ref(false)
 
-    const {
-        deleteType,
-        typePeriod,
-        resetTypeFilters
-    } = useMassDeleteType()
+    const previewTransactions = ref([])
+    const previewLoaded = ref(false)
 
-    const {
-        previewTransactions,
-        previewLoaded,
-        loading,
-        error,
-        showConfirmDialog,
-        deleting,
-        previewStats,
-        fetchPreview,
-        executeDelete,
-        resetPreview
-    } = useMassDeletePreview()
+    const previewStats = computed(() => {
+        let income = 0, expenses = 0
+        previewTransactions.value.forEach(t => {
+            const amount = parseFloat(t.amount) || 0
+            if (t.type === 'income') income += amount
+            else expenses += amount
+        })
+        return { income, expenses, balance: income - expenses }
+    })
 
-    const currencies = ref([])
-    const bynCurrency = ref(null)
+    const dateSelectionType = ref('range')
+    const dateRange = ref({ from: '', to: '' })
+    const singleDate = ref('')
+    const dateFromError = ref('')
+    const dateToError = ref('')
+    const singleDateError = ref('')
+    const minDate = ref('')
+    const maxDate = ref('')
+    const availableDates = ref([])
+    const allDatesAllowed = ref(false)
 
-    const fetchCurrencies = async () => {
+    const allCategories = ref([])
+    const selectedCategories = ref([])
+    const categoryPeriod = ref({ month: '' })
+
+    const deleteType = ref('')
+    const typePeriod = ref({ month: '' })
+
+    // ========== МЕТОДЫ ДЛЯ ДАТ ==========
+    const setDateRange = (dates) => {
+        if (dates && dates.length > 0) {
+            minDate.value = dates[0]
+            maxDate.value = dates[dates.length - 1]
+        } else {
+            const today = new Date()
+            const sixMonthsAgo = new Date()
+            sixMonthsAgo.setMonth(today.getMonth() - 6)
+            maxDate.value = today.toISOString().split('T')[0]
+            minDate.value = sixMonthsAgo.toISOString().split('T')[0]
+        }
+    }
+
+    const isDateAvailable = (date) => {
+        if (!date || allDatesAllowed.value) return true
+        return availableDates.value.includes(date)
+    }
+
+    const validateDateFrom = () => {
+        dateFromError.value = ''
+        if (dateRange.value.from && !isDateAvailable(dateRange.value.from)) {
+            dateFromError.value = 'На эту дату нет курса валют'
+        }
+    }
+
+    const validateDateTo = () => {
+        dateToError.value = ''
+        if (dateRange.value.to && !isDateAvailable(dateRange.value.to)) {
+            dateToError.value = 'На эту дату нет курса валют'
+        }
+    }
+
+    const validateSingleDate = () => {
+        singleDateError.value = ''
+        if (singleDate.value && !isDateAvailable(singleDate.value)) {
+            singleDateError.value = 'На эту дату нет курса валют'
+        }
+    }
+
+    const availableDatesHint = computed(() => {
+        if (allDatesAllowed.value) return ''
+        if (availableDates.value.length === 0) return 'Нет доступных дат'
+        if (availableDates.value.length > 10) {
+            return `${availableDates.value[0]} ... ${availableDates.value[availableDates.value.length - 1]} (${availableDates.value.length} дат)`
+        }
+        return availableDates.value.join(', ')
+    })
+
+    const isDateSelectionValid = computed(() => {
+        if (dateSelectionType.value === 'range') {
+            return dateRange.value.from && dateRange.value.to
+        }
+        return !!singleDate.value
+    })
+
+    const isDateSelectionUnavailable = computed(() => {
+        if (dateSelectionType.value === 'range') {
+            return (dateRange.value.from && !isDateAvailable(dateRange.value.from)) ||
+                (dateRange.value.to && !isDateAvailable(dateRange.value.to))
+        }
+        return singleDate.value && !isDateAvailable(singleDate.value)
+    })
+
+    // ========== МЕТОДЫ ДЛЯ КАТЕГОРИЙ ==========
+    const fetchCategories = async () => {
         try {
-            const response = await axios.get('/api/currencies')
-            currencies.value = response.data.data || []
-            const byn = currencies.value.find(c => c.code === 'BYN')
-            if (byn) {
-                bynCurrency.value = byn
-                await fetchAvailableDates(byn.id)
+            const response = await axios.get('/api/categories')
+            allCategories.value = response.data.data || []
+        } catch (err) {
+            console.error('Error fetching categories:', err)
+        }
+    }
+
+    // ========== МЕТОДЫ ДЛЯ ВАЛЮТ ==========
+    const fetchCurrencies = async () => {
+        await currenciesHook.fetchCurrencies()
+        const byn = currenciesHook.currencies.value.find(c => c.code === 'BYN')
+        if (byn) {
+            await currenciesHook.fetchAvailableDates(byn.id)
+            availableDates.value = currenciesHook.availableDates.value
+            allDatesAllowed.value = currenciesHook.allDatesAllowed.value
+            setDateRange(currenciesHook.availableDates.value)
+        }
+    }
+
+    // ========== МЕТОДЫ ДЛЯ PREVIEW ==========
+    const buildTransactionsQueryString = (opts) => {
+        const sp = new URLSearchParams()
+        if (opts.fetch_all) sp.set('fetch_all', '1')
+        if (opts.type) sp.set('type', opts.type)
+        if (opts.date_from) sp.set('date_from', opts.date_from)
+        if (opts.date_to) sp.set('date_to', opts.date_to)
+        if (opts.year != null && opts.year !== '') sp.set('year', String(opts.year))
+        if (opts.month != null && opts.month !== '') sp.set('month', String(opts.month))
+        if (opts.category_ids?.length) {
+            for (const id of opts.category_ids) {
+                sp.append('category_ids[]', String(id))
+            }
+        }
+        return sp.toString()
+    }
+
+    const fetchPreview = async (params) => {
+        try {
+            loading.value = true
+            error.value = ''
+            const qs = buildTransactionsQueryString(params)
+            const response = await axios.get(`/api/transactions?${qs}`)
+            previewTransactions.value = response.data.data || []
+            previewLoaded.value = true
+            if (previewTransactions.value.length === 0) {
+                error.value = 'По вашему запросу транзакции не найдены'
+                setTimeout(() => { error.value = '' }, 3000)
             }
         } catch (err) {
-            console.error('Error fetching currencies:', err)
+            console.error('Error previewing transactions:', err)
+            error.value = 'Ошибка при поиске транзакций'
+        } finally {
+            loading.value = false
         }
     }
 
-    const fetchAvailableDates = async (currencyId) => {
+    const executeDelete = async (transactionIds, router, showNotification) => {
         try {
-            const response = await axios.get('/api/currencies/available-dates', {
-                params: { currency_id: currencyId }
-            })
-            availableDates.value = response.data.data.available_dates || []
-            allDatesAllowed.value = response.data.data.all_dates_allowed || false
-            setDateRange(availableDates.value)
+            deleting.value = true
+            error.value = ''
+            await axios.post('/api/transactions/mass-delete', { transaction_ids: transactionIds })
+            showConfirmDialog.value = false
+            previewTransactions.value = []
+            previewLoaded.value = false
+            if (showNotification) {
+                showNotification('success', `Удалено ${transactionIds.length} транзакций`)
+            }
+            router.push('/transactions')
         } catch (err) {
-            console.error('Error fetching available dates:', err)
+            console.error('Error deleting transactions:', err)
+            error.value = err.response?.data?.message || 'Ошибка при удалении транзакций'
+        } finally {
+            deleting.value = false
         }
     }
 
-    const getCurrencySymbol = (currencyCode) => {
-        const symbols = { 'BYN': 'Br', 'RUB': '₽', 'USD': '$', 'EUR': '€', 'CNY': '¥' }
-        return symbols[currencyCode] || 'Br'
-    }
-
-    const formatMoney = (amount) => {
-        if (amount === null || isNaN(amount)) return '0 Br'
-        return new Intl.NumberFormat('ru-RU', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        }).format(amount) + ' Br'
-    }
-
-    const formatTransactionMoney = (transaction) => {
-        const currencyCode = transaction.currency?.code || 'BYN'
-        const symbol = getCurrencySymbol(currencyCode)
-        return new Intl.NumberFormat('ru-RU', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        }).format(transaction.amount) + ' ' + symbol
-    }
-
-    const formatDate = (dateString) => {
-        if (!dateString) return ''
-        const date = new Date(dateString)
-        return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    }
-
+    // ========== МЕТОДЫ ДЕЙСТВИЙ ==========
     const previewByDate = async () => {
         if (isDateSelectionUnavailable.value) {
             error.value = 'Выбраны даты без курса валют'
@@ -179,19 +255,43 @@ export function useMassDelete() {
     }
 
     const resetAll = () => {
-        resetDateFilters()
-        resetCategoryFilters()
-        resetTypeFilters()
-        resetPreview()
+        // Сброс дат
+        dateSelectionType.value = 'range'
+        dateRange.value = { from: '', to: '' }
+        singleDate.value = ''
+        dateFromError.value = ''
+        dateToError.value = ''
+        singleDateError.value = ''
+
+        // Сброс категорий
+        selectedCategories.value = []
+        categoryPeriod.value = { month: '' }
+
+        // Сброс типа
+        deleteType.value = ''
+        typePeriod.value = { month: '' }
+
+        // Сброс превью
+        previewTransactions.value = []
+        previewLoaded.value = false
+        showConfirmDialog.value = false
+        error.value = ''
         deleteFilters.value = { type: '' }
         activeTab.value = 'date'
     }
 
     const switchTab = (tab) => {
         activeTab.value = tab
-        resetPreview()
+        previewTransactions.value = []
+        previewLoaded.value = false
     }
 
+    // ========== ФОРМАТИРОВАНИЕ ==========
+    const formatMoney = currenciesHook.formatMoneyAmount
+    const formatTransactionMoney = currenciesHook.formatTransactionMoney
+    const formatDate = dateFormatter.formatDate
+
+    // ========== ИНИЦИАЛИЗАЦИЯ ==========
     onMounted(() => {
         fetchCategories()
         fetchCurrencies()
@@ -207,6 +307,7 @@ export function useMassDelete() {
         showConfirmDialog,
         deleting,
         previewStats,
+
         dateSelectionType,
         dateRange,
         singleDate,
@@ -224,12 +325,15 @@ export function useMassDelete() {
         isDateSelectionUnavailable,
         availableDatesHint,
         isDateAvailable,
+
         validateDateFrom,
         validateDateTo,
         validateSingleDate,
+
         formatMoney,
         formatTransactionMoney,
         formatDate,
+
         previewByDate,
         previewByCategory,
         previewByType,

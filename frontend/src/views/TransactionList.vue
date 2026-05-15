@@ -217,14 +217,6 @@
                     </div>
                     <span v-else class="no-category-text">Без категории</span>
                   </div>
-
-                  <div class="meta-item">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <rect x="2" y="6" width="20" height="12" rx="2"/>
-                      <path d="M12 16v-4M8 16v-4"/>
-                    </svg>
-                    <span>{{ getPaymentMethodLabel(transaction.payment_method) }}</span>
-                  </div>
                 </div>
               </div>
 
@@ -271,52 +263,42 @@
 </template>
 
 <script>
-import { useTransactionsList } from '../composables/useTransactionsList'
-import { useCurrencyFormatter } from '../composables/useCurrencyFormatter'
+import { onMounted } from 'vue'
+import { useTransactions } from '../composables/useTransactions.js'
+import { useCurrencies } from '../composables/useCurrencies'
 import { useDateFormatter } from '../composables/useDateFormatter'
-import { usePaymentMethod } from '../composables/usePaymentMethod'
 
 export default {
   name: 'TransactionList',
   setup() {
-    const {
-      transactions,
-      loading,
-      filters,
-      filteredStats,
-      filteredBalanceClass,
-      fetchTransactions,
-      editTransaction,
-      deleteTransaction,
-      resetFilters
-    } = useTransactionsList()
-
-    const {
-      getCurrencyCode,
-      formatRate,
-      formatTransactionMoney,
-      formatMoneyAmount
-    } = useCurrencyFormatter()
-
+    const transactionsCore = useTransactions()
+    const currencies = useCurrencies()
     const { formatDate } = useDateFormatter()
-    const { getPaymentMethodLabel } = usePaymentMethod()
+
+    onMounted(() => {
+      transactionsCore.fetchTransactions()
+    })
 
     return {
-      transactions,
-      loading,
-      filters,
-      filteredStats,
-      filteredBalanceClass,
-      fetchTransactions,
-      editTransaction,
-      deleteTransaction,
-      resetFilters,
-      getCurrencyCode,
-      formatRate,
-      formatTransactionMoney,
-      formatMoneyAmount,
+      // Из transactionsCore
+      transactions: transactionsCore.transactions,
+      loading: transactionsCore.loading,
+      filters: transactionsCore.filters,
+      filteredStats: transactionsCore.filteredStats,
+      filteredBalanceClass: transactionsCore.filteredBalanceClass,
+      fetchTransactions: transactionsCore.fetchTransactions,
+      editTransaction: transactionsCore.editTransaction,
+      deleteTransaction: transactionsCore.deleteTransaction,
+      resetFilters: transactionsCore.resetFilters,
+
+      // Форматирование из useCurrencies
+      formatTransactionMoney: currencies.formatTransactionMoney,
+      formatMoneyAmount: currencies.formatMoneyAmount,
+      getCurrencyCode: currencies.getCurrencyCode,
+      formatRate: currencies.formatRate,
+
+      // Другие форматирования
       formatDate,
-      getPaymentMethodLabel
     }
   }
 }

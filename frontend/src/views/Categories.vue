@@ -346,136 +346,90 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'  // ← ДОБАВИТЬ ref в импорт!
+import { onMounted } from 'vue'
 import { useCategories } from '../composables/useCategories'
-import { useCategoryForm } from '../composables/useCategoryForm'
-import { useCategoryFilters } from '../composables/useCategoryFilters'
-import { useCategoryStats } from '../composables/useCategoryStats'
 
 export default {
   name: 'CategoriesPage',
   setup() {
-    const {
-      categories,
-      loading,
-      error,
-      colorOptions,
-      incomeCategories,
-      expenseCategories,
-      totalCategories,
-      fetchCategoriesWithStats,
-      createCategory,
-      updateCategory,
-      deleteCategory
-    } = useCategories()
-
-    const {
-      showModal,
-      isEditing,
-      editingId,
-      hasTransactions,
-      formErrors,
-      formData,
-      openAddForm,
-      openEditForm,
-      closeModal,
-      validateForm
-    } = useCategoryForm(colorOptions)
-
-    const {
-      activeTab,
-      displayedCategories,
-      setTab
-    } = useCategoryFilters(incomeCategories, expenseCategories)
-
-    const {
-      displayedCategoriesWithMonthData,
-      formatMoney,
-      formatMoneyAmount,
-      formatDate
-    } = useCategoryStats(displayedCategories)
-
-    // Эта переменная не используется, можно удалить
-    // const currentEditingCategory = ref(null)
+    const categories = useCategories()
 
     const saveCategory = async () => {
-      if (!validateForm()) return
+      if (!categories.validateForm()) return
 
       try {
-        loading.value = true
-        error.value = ''
-
-        const payload = { ...formData.value, name: formData.value.name.trim() }
-
-        if (isEditing.value) {
-          await updateCategory(editingId.value, payload)
-        } else {
-          await createCategory(payload)
+        const payload = {
+          ...categories.formData.value,
+          name: categories.formData.value.name.trim()
         }
 
-        await fetchCategoriesWithStats()
-        closeModal()
+        if (categories.isEditing.value) {
+          await categories.updateCategory(categories.editingId.value, payload)
+        } else {
+          await categories.createCategory(payload)
+        }
+
+        await categories.fetchCategoriesWithStats()
+        categories.closeModal()
       } catch (err) {
         console.error('Ошибка сохранения категории:', err)
-        error.value = err.response?.data?.message || 'Ошибка при сохранении категории'
-      } finally {
-        loading.value = false
+        categories.error.value = err.response?.data?.message || 'Ошибка при сохранении категории'
       }
     }
 
     const promptDelete = async () => {
-      if (!isEditing.value) return
+      if (!categories.isEditing.value) return
 
-      if (hasTransactions.value) {
-        error.value = 'Нельзя удалить категорию с транзакциями'
-        setTimeout(() => { error.value = '' }, 3000)
+      if (categories.hasTransactions.value) {
+        categories.error.value = 'Нельзя удалить категорию с транзакциями'
+        setTimeout(() => { categories.error.value = '' }, 3000)
         return
       }
 
       try {
-        await deleteCategory(editingId.value)
-        await fetchCategoriesWithStats()
-        closeModal()
+        await categories.deleteCategory(categories.editingId.value)
+        await categories.fetchCategoriesWithStats()
+        categories.closeModal()
       } catch (err) {
-        error.value = err.response?.data?.message || 'Ошибка при удалении категории'
-        setTimeout(() => { error.value = '' }, 3000)
+        categories.error.value = err.response?.data?.message || 'Ошибка при удалении категории'
+        setTimeout(() => { categories.error.value = '' }, 3000)
       }
     }
 
     onMounted(() => {
-      fetchCategoriesWithStats()
+      categories.fetchCategoriesWithStats()
     })
 
     return {
       // Данные
-      loading,
-      error,
-      colorOptions,
-      incomeCategories,
-      expenseCategories,
-      totalCategories,
+      loading: categories.loading,
+      error: categories.error,
+      colorOptions: categories.colorOptions,
+      incomeCategories: categories.incomeCategories,
+      expenseCategories: categories.expenseCategories,
+      totalCategories: categories.totalCategories,
 
       // Фильтры
-      activeTab,
-      displayedCategoriesWithMonthData,
-      setTab,
+      activeTab: categories.activeTab,
+      displayedCategoriesWithMonthData: categories.displayedCategoriesWithMonthData,
+      setTab: categories.setTab,
 
       // Модальное окно
-      showModal,
-      isEditing,
-      formData,
-      formErrors,
-      hasTransactions,
-      openAddForm,
-      openEditForm,
-      closeModal,
+      showModal: categories.showModal,
+      isEditing: categories.isEditing,
+      formData: categories.formData,
+      formErrors: categories.formErrors,
+      hasTransactions: categories.hasTransactions,
+      openAddForm: categories.openAddForm,
+      openEditForm: categories.openEditForm,
+      closeModal: categories.closeModal,
       saveCategory,
       promptDelete,
 
       // Форматирование
-      formatMoney,
-      formatMoneyAmount,
-      formatDate
+      formatMoney: categories.formatMoney,
+      formatMoneyAmount: categories.formatMoneyAmount,
+      formatDate: categories.formatDate
     }
   }
 }

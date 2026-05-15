@@ -294,7 +294,7 @@
 </template>
 
 <script>
-import { useHome } from '../composables/useHome'
+import { useHome } from '../composables/useHome.js'
 
 export default {
   name: 'Home',
