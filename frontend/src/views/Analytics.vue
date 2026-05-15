@@ -314,11 +314,10 @@
         </div>
 
         <div class="quality-card">
-          <span class="quality-label">Метод</span>
-          <span class="quality-value">{{ forecastData.model }}</span>
-          <span class="quality-desc">прогнозирования</span>
+          <span class="quality-label">Метод прогнозирования</span>
+          <span class="quality-value">{{ getRussianMethodName(forecastData.model) }}</span>
           <div class="card-tooltip">
-            <strong>⚙️ Как работает метод "{{ forecastData.model }}"?</strong><br>
+            <strong>⚙️ Как работает метод "{{ getRussianMethodName(forecastData.model) }}"?</strong><br>
             <span class="tooltip-sub" v-html="getMethodDescription(forecastData.model)"></span>
           </div>
         </div>
@@ -406,7 +405,7 @@
         </div>
       </div>
 
-      <div v-if="forecastData.reliability_message" class="reliability-message"><span class="message-icon">⚠️</span><span>{{ forecastData.reliability_message }}</span></div>
+      <div v-if="forecastData.reliability_message" class="reliability-message"><span class="message-icon"></span><span>{{ forecastData.reliability_message }}</span></div>
     </div>
   </div>
 </template>
@@ -441,6 +440,16 @@ export default {
       const num = Number(amount)
       if (isNaN(num)) return '0'
       return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num)
+    }
+
+    const getRussianMethodName = (method) => {
+      const names = {
+        'SimpleExtrapolation': 'Линейная экстраполяция',
+        'LinearRegression': 'Линейная регрессия',
+        'DoubleExponentialSmoothing': 'Двойное сглаживание',
+        'HoltWinters': 'Хольта-Уинтерса'
+      }
+      return names[method] || method
     }
 
     const formatExchangeRate = (rate) => {
@@ -787,7 +796,7 @@ export default {
     watch([selectedPeriod, selectedDate, selectedYear, includeAnomalies], () => { if (!loading.value) fetchAnalytics() })
 
     return {
-      analytics, forecastData, detectedAnomalies, loading, applyingChanges, selectedPeriod, selectedDate, selectedYear,
+      analytics, getRussianMethodName, forecastData, detectedAnomalies, loading, applyingChanges, selectedPeriod, selectedDate, selectedYear,
       includeAnomalies, showResultModal, resultModal, processedTotals, categorySpending, financialHealth, balanceClass,
       currentMonthName, periodLabel, localAnomaliesTotalAmount, hasLocalChanges, maxDailyForecast, formatMoney,
       formatMoneyAmount, formatExchangeRate, formatDate, formatDay, formatChange, getTrendIcon, getTrendText,

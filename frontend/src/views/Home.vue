@@ -448,8 +448,8 @@ export default {
         }
 
         const summaryUrl = '/api/transactions/summary'
-        const recentUrl = '/api/transactions/recent?limit=6'
-        const allTransactionsUrl = '/api/transactions?limit=10000'
+        const recentUrl = '/api/transactions/recent?limit=6&include_anomalies=true'
+        const allTransactionsUrl = '/api/transactions?limit=10000&include_anomalies=true'
         const trendsUrl = '/api/analytics/monthly-trends?months=12'
 
         const summaryPromise = fetch(summaryUrl, { headers, credentials: 'include' })

@@ -284,7 +284,8 @@ export default {
 
     const filters = ref({
       type: '',
-      month: new Date().toISOString().slice(0, 7)
+      month: new Date().toISOString().slice(0, 7),
+      includeAnomalies: false
     })
 
     // Символы валют для 5 основных валют
@@ -375,7 +376,9 @@ export default {
     const fetchTransactions = async () => {
       try {
         loading.value = true
-        const params = {}
+        const params = {
+          include_anomalies: 'true'
+        }
 
         if (filters.value.type) params.type = filters.value.type
         if (filters.value.month) {
@@ -410,7 +413,8 @@ export default {
     const resetFilters = () => {
       filters.value = {
         type: '',
-        month: new Date().toISOString().slice(0, 7)
+        month: new Date().toISOString().slice(0, 7),
+        includeAnomalies: false
       }
       fetchTransactions()
     }

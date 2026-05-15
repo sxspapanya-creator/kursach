@@ -38,7 +38,7 @@ class TransactionController extends Controller
                 'date_from' => 'nullable|date',
                 'date_to' => 'nullable|date|after_or_equal:date_from',
                 'limit' => 'nullable|integer|min:1|max:10000',
-                'include_anomalies' => 'nullable|boolean', // НОВЫЙ ПАРАМЕТР
+                'include_anomalies' => 'nullable|in:true,false,1,0',
             ]);
 
             $fetchAll = $request->boolean('fetch_all');
@@ -551,11 +551,11 @@ class TransactionController extends Controller
 
             $validated = $request->validate([
                 'limit' => 'nullable|integer|min:1|max:1000',
-                'include_anomalies' => 'nullable|boolean', // НОВОЕ
+                'include_anomalies' => 'nullable|in:true,false,0,1'
             ]);
 
             $limit = $validated['limit'] ?? 10;
-            $includeAnomalies = $request->boolean('include_anomalies', false);
+            $includeAnomalies = $request->boolean('include_anomalies');
 
             $query = Transaction::where('user_id', $userId)
                 ->with(['categories', 'currency']);
