@@ -325,7 +325,6 @@ class AuthController extends Controller
                 }
             }
 
-            // Если email не меняется - обновляем имя и salary_day
             $updateData = ['name' => $validated['name']];
             if (isset($validated['salary_day'])) {
                 $updateData['salary_day'] = $validated['salary_day'];

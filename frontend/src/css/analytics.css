@@ -1,5 +1,4 @@
-
-/* Основные стили страницы */
+/* ========== ОСНОВНЫЕ СТИЛИ СТРАНИЦЫ ========== */
 .analytics-page {
     max-width: 1400px;
     margin: 0 auto;
@@ -7,9 +6,11 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     box-sizing: border-box;
     width: 100%;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
 }
 
-/* Заголовок */
+/* ========== ЗАГОЛОВОК ========== */
 .header {
     display: flex;
     justify-content: space-between;
@@ -35,20 +36,48 @@
     flex-wrap: wrap;
 }
 
-.period-controls select,
-.period-controls input {
-    padding: 0.75rem 1rem;
+.period-tabs {
+    display: flex;
+    gap: 4px;
+    background: #f1f3f5;
+    padding: 4px;
+    border-radius: 12px;
+}
+
+.period-tab {
+    padding: 8px 16px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #6c757d;
+}
+
+.period-tab.active {
+    background: white;
+    color: #1a1a2e;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.period-tab:hover:not(.active) {
+    background: #e9ecef;
+}
+
+.date-input,
+.year-input {
+    padding: 8px 12px;
     border: 2px solid #e0e0e0;
     border-radius: 10px;
     font-size: 1rem;
     background: white;
     transition: all 0.3s;
-    box-sizing: border-box;
-    min-width: 120px;
 }
 
-.period-controls select:focus,
-.period-controls input:focus {
+.date-input:focus,
+.year-input:focus {
     outline: none;
     border-color: #3498db;
     box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
@@ -77,7 +106,7 @@
     cursor: not-allowed;
 }
 
-/* Метрики */
+/* ========== МЕТРИКИ ========== */
 .metrics-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -186,7 +215,7 @@
 
 .tooltip-text {
     visibility: hidden;
-    width: 260px;
+    width: 280px;
     background-color: #1e293b;
     color: #fff;
     text-align: left;
@@ -197,7 +226,7 @@
     top: 125%;
     margin-top: 10px;
     left: 50%;
-    margin-left: -130px;
+    margin-left: -140px;
     font-size: 0.75rem;
     font-weight: normal;
     line-height: 1.4;
@@ -228,7 +257,838 @@
     color: #facc15;
 }
 
-/* Модальное окно */
+/* ========== АНОМАЛИИ ========== */
+.anomalies-section {
+    margin-top: 32px;
+    background: #fff;
+    border-radius: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    overflow: visible;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.section-header h2 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.anomalies-count {
+    font-size: 13px;
+    padding: 4px 12px;
+    background: #ef4444;
+    color: white;
+    border-radius: 20px;
+    font-weight: 500;
+}
+
+.anomalies-table-container {
+    overflow-x: auto;
+}
+
+.anomalies-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.anomalies-table th {
+    text-align: left;
+    padding: 14px 16px;
+    background: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.anomalies-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f0f0f0;
+    vertical-align: middle;
+}
+
+.anomalies-table tr:hover {
+    background: #f8f9fa;
+}
+
+.anomalies-table tr.anomaly-changed {
+    background: #fff3e0;
+}
+
+.checkbox-cell {
+    text-align: center;
+    width: 40px;
+}
+
+.checkbox-cell input {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.description-cell {
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.category-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.payment-method-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.payment-method-badge.cash {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.payment-method-badge.card {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.payment-method-badge.transfer {
+    background: #fff3e0;
+    color: #ef6c00;
+}
+
+.amount-cell .original-amount {
+    color: #6c757d;
+    font-size: 12px;
+}
+
+.rate-cell {
+    color: #6c757d;
+    font-size: 13px;
+}
+
+.rate-na {
+    color: #adb5bd;
+}
+
+.byn-cell strong {
+    color: #1a1a2e;
+    font-weight: 600;
+}
+
+.anomalies-footer {
+    padding: 16px 24px;
+    background: #f8f9fa;
+    border-top: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.anomalies-total strong {
+    font-size: 18px;
+    color: #ef4444;
+}
+
+.anomalies-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+}
+
+.anomalies-hint {
+    font-size: 12px;
+    color: #6c757d;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.hint-note {
+    font-size: 11px;
+    color: #6c84a3;
+    background: #eef2f7;
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 12px;
+}
+
+.btn-apply {
+    padding: 8px 20px;
+    background: #4caf50;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.btn-apply:hover:not(:disabled) {
+    background: #45a049;
+    transform: translateY(-1px);
+}
+
+.btn-apply:disabled {
+    background: #a5d6a7;
+    cursor: not-allowed;
+}
+
+.btn-cancel {
+    padding: 8px 20px;
+    background: #f44336;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.btn-cancel:hover {
+    background: #d32f2f;
+    transform: translateY(-1px);
+}
+
+/* ========== РАСХОДЫ ПО КАТЕГОРИЯМ ========== */
+.categories-section {
+    margin-top: 32px;
+    background: #fff;
+    border-radius: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    overflow: hidden;
+}
+
+.section-header-right {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.total-expenses {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a2e;
+}
+
+.period-badge {
+    font-size: 13px;
+    padding: 4px 12px;
+    background: #e9ecef;
+    border-radius: 20px;
+    color: #6c757d;
+}
+
+.categories-table-container {
+    overflow-x: auto;
+    padding: 0 24px 24px 24px;
+}
+
+.categories-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.categories-table th {
+    text-align: left;
+    padding: 14px 12px;
+    background: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.categories-table td {
+    padding: 12px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.category-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 500;
+}
+
+.category-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 4px;
+}
+
+.category-amount-cell {
+    font-weight: 600;
+    color: #1a1a2e;
+}
+
+.category-percent-cell {
+    color: #6c757d;
+}
+
+.category-progress-cell {
+    width: 200px;
+}
+
+.table-progress {
+    height: 8px;
+    background: #f0f0f0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.table-progress-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.empty-categories {
+    text-align: center;
+    padding: 60px 24px;
+}
+
+.empty-icon {
+    font-size: 64px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+/* ========== ПЛАНИРОВАНИЕ РАСХОДОВ ========== */
+.forecast-section {
+    margin-top: 32px;
+    background: #fff;
+    border-radius: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    overflow: visible;
+}
+
+.metrics-quality {
+    display: flex;
+    gap: 16px;
+    padding: 20px 24px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    flex-wrap: wrap;
+    overflow: visible;
+    position: relative;
+    z-index: 1;
+}
+
+/* Карточка с тултипом внизу */
+.quality-card {
+    flex: 1;
+    min-width: 120px;
+    text-align: center;
+    padding: 12px;
+    background: white;
+    border-radius: 12px;
+    position: relative;
+    cursor: help;
+    overflow: visible;
+    z-index: 1;
+    transition: z-index 0s;
+}
+
+.quality-card:hover {
+    z-index: 10000;
+}
+
+.quality-card:hover .card-tooltip {
+    display: block;
+}
+
+.card-tooltip {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a2e;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 12px;
+    width: 320px;
+    max-width: 90vw;
+    text-align: left;
+    z-index: 10001;
+    margin-top: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    white-space: normal;
+    word-wrap: break-word;
+    line-height: 1.4;
+}
+
+.card-tooltip::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 8px solid #1a1a2e;
+}
+
+.card-tooltip strong {
+    display: block;
+    margin-bottom: 8px;
+    color: #4caf50;
+    font-size: 13px;
+}
+
+.card-tooltip .tooltip-sub {
+    display: block;
+    margin-top: 8px;
+    color: #adb5bd;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+/* Альтернативное позиционирование для крайних карточек */
+.quality-card:first-child .card-tooltip {
+    left: 0;
+    transform: translateX(0);
+}
+
+.quality-card:first-child .card-tooltip::before {
+    left: 20px;
+    transform: translateX(0);
+}
+
+.quality-card:last-child .card-tooltip {
+    left: auto;
+    right: 0;
+    transform: translateX(0);
+}
+
+.quality-card:last-child .card-tooltip::before {
+    left: auto;
+    right: 20px;
+    transform: translateX(0);
+}
+
+.quality-label {
+    font-size: 12px;
+    color: #6c757d;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.quality-value {
+    font-size: 20px;
+    font-weight: 700;
+    display: block;
+}
+
+.quality-value.excellent {
+    color: #4caf50;
+}
+
+.quality-value.good {
+    color: #8bc34a;
+}
+
+.quality-value.normal {
+    color: #ff9800;
+}
+
+.quality-value.bad {
+    color: #f44336;
+}
+
+.quality-value.high {
+    color: #4caf50;
+}
+
+.quality-value.medium {
+    color: #ff9800;
+}
+
+.quality-value.low {
+    color: #f44336;
+}
+
+.quality-desc {
+    font-size: 11px;
+    color: #adb5bd;
+}
+
+.forecast-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    padding: 24px;
+}
+
+.forecast-card {
+    background: linear-gradient(135deg, #f8f9fa 0%, #fff 100%);
+    border-radius: 16px;
+    padding: 20px;
+    border: 1px solid #e9ecef;
+}
+
+.forecast-card h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #495057;
+}
+
+.forecast-amount {
+    font-size: 28px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 16px;
+}
+
+.forecast-detail {
+    font-size: 13px;
+    color: #6c757d;
+    margin-bottom: 8px;
+}
+
+.forecast-trend {
+    font-size: 13px;
+    font-weight: 500;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #e9ecef;
+}
+
+.forecast-trend.growth {
+    color: #f44336;
+}
+
+.forecast-trend.decline {
+    color: #4caf50;
+}
+
+/* ========== ПОДНЕВНОЕ ПЛАНИРОВАНИЕ ========== */
+.daily-forecast {
+    padding: 0 24px 24px 24px;
+}
+
+.daily-forecast h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 20px;
+}
+
+.daily-scroll-container {
+    overflow-x: auto;
+}
+
+.daily-chart {
+    background: #f8f9fa;
+    border-radius: 16px;
+    padding: 20px;
+    min-width: max-content;
+}
+
+.chart-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    height: 220px;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.bar-item {
+    width: 60px;
+    background: linear-gradient(180deg, #3498db 0%, #2980b9 100%);
+    border-radius: 8px 8px 4px 4px;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.bar-item:hover {
+    transform: translateY(-4px);
+    background: linear-gradient(180deg, #e74c3c 0%, #c0392b 100%);
+}
+
+.bar-item:hover .bar-tooltip {
+    display: flex;
+}
+
+.bar-tooltip {
+    display: none;
+    position: absolute;
+    top: -80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a2e;
+    color: white;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    z-index: 100;
+}
+
+.bar-tooltip::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid #1a1a2e;
+}
+
+.tooltip-date {
+    font-weight: 600;
+}
+
+.tooltip-amount {
+    color: #4caf50;
+    font-weight: 600;
+}
+
+.chart-labels {
+    display: flex;
+    gap: 8px;
+}
+
+.label-item {
+    width: 60px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.label-day {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1a1a2e;
+}
+
+.label-week {
+    font-size: 11px;
+    color: #6c757d;
+}
+
+/* ========== ДЕТАЛЬНОЕ ПЛАНИРОВАНИЕ ПО КАТЕГОРИЯМ ========== */
+.category-forecast {
+    padding: 0 24px 24px 24px;
+}
+
+.category-forecast h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+.category-forecast.second-month {
+    margin-top: 24px;
+}
+
+.category-forecast-table {
+    background: #f8f9fa;
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.table-header {
+    display: grid;
+    grid-template-columns: 1fr 120px 100px 120px;
+    padding: 14px 20px;
+    background: #e9ecef;
+    font-size: 13px;
+    font-weight: 600;
+    color: #495057;
+}
+
+.table-body {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.table-row {
+    display: grid;
+    grid-template-columns: 1fr 120px 100px 120px;
+    padding: 12px 20px;
+    border-bottom: 1px solid #e9ecef;
+    align-items: center;
+}
+
+.table-row:hover {
+    background: #fff;
+}
+
+.row-category {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.cat-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+}
+
+.row-forecast {
+    font-weight: 600;
+    color: #1a1a2e;
+}
+
+.row-daily {
+    color: #6c757d;
+    font-size: 13px;
+}
+
+.row-share {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.share-bar {
+    flex: 1;
+    height: 6px;
+    background: #e9ecef;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.share-fill {
+    height: 100%;
+    border-radius: 3px;
+}
+
+.share-value {
+    font-size: 13px;
+    font-weight: 500;
+    min-width: 40px;
+}
+
+.reliability-message {
+    padding: 16px 24px;
+    background: #fff3e0;
+    border-top: 1px solid #ffe0b2;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #e65100;
+}
+
+.message-icon {
+    font-size: 16px;
+}
+
+/* ========== ОПТИМАЛЬНОЕ РАСПРЕДЕЛЕНИЕ ========== */
+.optimal-distribution-section {
+    margin: 2rem 0;
+    padding: 1rem;
+    background: #f8fafc;
+    border-radius: 16px;
+}
+
+.toggle-distribution {
+    width: 100%;
+    padding: 0.75rem;
+    background: #e2e8f0;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.distribution-table {
+    background: white;
+    border: 2px solid #e9ecef;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.distribution-table h3 {
+    margin: 0;
+    padding: 1.5rem;
+    background: #f8f9fa;
+    border-bottom: 2px solid #e9ecef;
+    font-size: 1.2rem;
+    color: #2c3e50;
+}
+
+.distribution-table table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.distribution-table th {
+    padding: 1rem;
+    background: #34495e;
+    color: white;
+    font-weight: 600;
+    text-align: left;
+}
+
+.distribution-table td {
+    padding: 1rem;
+    border-bottom: 1px solid #e9ecef;
+    vertical-align: middle;
+}
+
+.distribution-table tr:hover {
+    background: #f8f9fa;
+}
+
+.recommended-limit {
+    font-weight: 700;
+    color: #27ae60;
+}
+
+.apply-limit-btn {
+    background: #3498db;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.apply-limit-btn:hover {
+    background: #2980b9;
+    transform: translateY(-1px);
+}
+
+/* ========== МОДАЛЬНОЕ ОКНО ========== */
 .modal-overlay {
     position: fixed;
     top: 0;
@@ -312,90 +1172,12 @@
     background: #e2e8f0;
 }
 
-/* Оптимальное распределение */
-.optimal-distribution-section {
-    margin: 2rem 0;
-    padding: 1rem;
-    background: #f8fafc;
-    border-radius: 16px;
-}
-
-.toggle-distribution {
-    width: 100%;
-    padding: 0.75rem;
-    background: #e2e8f0;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: 500;
-}
-
-.distribution-table {
-    background: white;
-    border: 2px solid #e9ecef;
-    border-radius: 12px;
-    overflow: hidden;
-}
-
-.distribution-table h3 {
-    margin: 0;
-    padding: 1.5rem;
-    background: #f8f9fa;
-    border-bottom: 2px solid #e9ecef;
-    font-size: 1.2rem;
-    color: #2c3e50;
-}
-
-.distribution-table table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.distribution-table th {
-    padding: 1rem;
-    background: #34495e;
-    color: white;
-    font-weight: 600;
-    text-align: left;
-}
-
-.distribution-table td {
-    padding: 1rem;
-    border-bottom: 1px solid #e9ecef;
-    vertical-align: middle;
-}
-
-.distribution-table tr:hover {
-    background: #f8f9fa;
-}
-
-.recommended-limit {
-    font-weight: 700;
-    color: #27ae60;
-}
-
-.apply-limit-btn {
-    background: #3498db;
-    color: white;
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-}
-
-.apply-limit-btn:hover {
-    background: #2980b9;
-    transform: translateY(-1px);
-}
-
-/* Адаптивность */
+/* ========== АДАПТИВНОСТЬ ========== */
 @media (max-width: 1200px) {
     .analytics-page {
         padding: 1.5rem;
     }
+
     .metrics-grid {
         grid-template-columns: repeat(2, 1fr);
     }
@@ -405,38 +1187,109 @@
     .analytics-page {
         padding: 1rem;
     }
+
     .header {
         flex-direction: column;
         gap: 1rem;
         align-items: stretch;
     }
+
     .header h1 {
         font-size: 1.75rem;
     }
+
     .period-controls {
         flex-wrap: wrap;
         width: 100%;
     }
+
     .period-controls select,
     .period-controls input {
         flex: 1;
         min-width: 120px;
     }
+
     .refresh-btn {
         width: 100%;
     }
+
     .metrics-grid {
         grid-template-columns: 1fr;
         gap: 1rem;
     }
+
     .metric-card {
         padding: 1.25rem;
     }
+
+    .forecast-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .table-header,
+    .table-row {
+        grid-template-columns: 1fr 100px 80px 100px;
+        font-size: 12px;
+        padding: 10px 12px;
+    }
+
+    .anomalies-footer {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .anomalies-actions {
+        align-items: stretch;
+    }
+
+    .action-buttons {
+        flex-direction: column;
+    }
+
+    .btn-apply,
+    .btn-cancel {
+        width: 100%;
+    }
+
+    .bar-item,
+    .label-item {
+        width: 45px;
+    }
+
+    .categories-table-container {
+        padding: 0 16px 16px 16px;
+    }
+
+    .categories-table th,
+    .categories-table td {
+        padding: 10px 8px;
+    }
+
+    .card-tooltip {
+        width: 260px;
+        max-width: 85vw;
+    }
+
+    .quality-card:first-child .card-tooltip,
+    .quality-card:last-child .card-tooltip {
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+    }
+
+    .quality-card:first-child .card-tooltip::before,
+    .quality-card:last-child .card-tooltip::before {
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+    }
+
     .distribution-table th,
     .distribution-table td {
         padding: 0.5rem;
         font-size: 0.85rem;
     }
+
     .modal-content {
         width: 95%;
         max-width: 95%;
@@ -447,15 +1300,19 @@
     .analytics-page {
         padding: 0.75rem;
     }
+
     .header h1 {
         font-size: 1.5rem;
     }
+
     .metric-card {
         padding: 1rem;
     }
+
     .metric-value {
         font-size: 1.5rem;
     }
+
     .modal-body {
         padding: 1rem;
     }

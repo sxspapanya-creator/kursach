@@ -271,188 +271,35 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import axios from 'axios'
+import { useTransactionsList } from '../composables/useTransactionsList'
+import { useCurrencyFormatter } from '../composables/useCurrencyFormatter'
+import { useDateFormatter } from '../composables/useDateFormatter'
+import { usePaymentMethod } from '../composables/usePaymentMethod'
 
 export default {
   name: 'TransactionList',
   setup() {
-    const router = useRouter()
-    const transactions = ref([])
-    const loading = ref(true)
+    const {
+      transactions,
+      loading,
+      filters,
+      filteredStats,
+      filteredBalanceClass,
+      fetchTransactions,
+      editTransaction,
+      deleteTransaction,
+      resetFilters
+    } = useTransactionsList()
 
-    const filters = ref({
-      type: '',
-      month: new Date().toISOString().slice(0, 7),
-      includeAnomalies: false
-    })
+    const {
+      getCurrencyCode,
+      formatRate,
+      formatTransactionMoney,
+      formatMoneyAmount
+    } = useCurrencyFormatter()
 
-    // Символы валют для 5 основных валют
-    const getCurrencySymbol = (currencyId, currencyCode) => {
-      if (currencyCode) {
-        const symbols = {
-          'BYN': 'Br',
-          'RUB': '₽',
-          'USD': '$',
-          'EUR': '€',
-          'CNY': '¥'
-        }
-        return symbols[currencyCode] || 'Br'
-      }
-
-      const symbols = {
-        1: 'Br',   // BYN
-        2: '₽',    // RUB
-        3: '$',    // USD
-        4: '€',    // EUR
-        5: '¥'     // CNY
-      }
-      return symbols[currencyId] || 'Br'
-    }
-
-    // Код валюты по ID
-    const getCurrencyCode = (currencyId) => {
-      const codes = {
-        1: 'BYN',
-        2: 'RUB',
-        3: 'USD',
-        4: 'EUR',
-        5: 'CNY'
-      }
-      return codes[currencyId] || 'BYN'
-    }
-
-    // Форматирование курса (4 знака после запятой)
-    const formatRate = (rate) => {
-      if (!rate && rate !== 0) return '0.0000'
-      return Number(rate).toFixed(4)
-    }
-
-    // Форматирование суммы для транзакции (с валютой)
-    const formatTransactionMoney = (transaction) => {
-      if (!transaction) return '0 Br'
-      const amount = transaction.amount || 0
-      const currencySymbol = transaction.currency?.symbol || getCurrencySymbol(transaction.currency_id, transaction.currency?.code)
-
-      return new Intl.NumberFormat('ru-RU', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }).format(amount) + ' ' + currencySymbol
-    }
-
-    // Форматирование просто суммы (для сводки)
-    const formatMoneyAmount = (amount) => {
-      if (amount === null || amount === undefined || isNaN(amount)) return '0'
-      return new Intl.NumberFormat('ru-RU', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }).format(amount)
-    }
-
-    const formatDate = (dateString) => {
-      if (!dateString) return 'Дата не указана'
-      try {
-        const date = new Date(dateString)
-        return date.toLocaleDateString('ru-RU', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric'
-        })
-      } catch {
-        return 'Неверная дата'
-      }
-    }
-
-    const getPaymentMethodLabel = (method) => {
-      const methods = {
-        cash: 'Наличные',
-        card: 'Карта',
-        transfer: 'Перевод'
-      }
-      return methods[method] || method
-    }
-
-    const fetchTransactions = async () => {
-      try {
-        loading.value = true
-        const params = {
-          include_anomalies: 'true'
-        }
-
-        if (filters.value.type) params.type = filters.value.type
-        if (filters.value.month) {
-          const [year, month] = filters.value.month.split('-')
-          params.month = parseInt(month)
-          params.year = parseInt(year)
-        }
-
-        const response = await axios.get('/api/transactions', { params })
-        transactions.value = response.data.data || []
-      } catch (error) {
-        console.error('Error fetching transactions:', error)
-      } finally {
-        loading.value = false
-      }
-    }
-
-    const editTransaction = (transaction) => {
-      router.push(`/transactions/edit/${transaction.id}`)
-    }
-
-    const deleteTransaction = async (id) => {
-      try {
-        await axios.delete(`/api/transactions/${id}`)
-        await fetchTransactions()
-      } catch (error) {
-        console.error('Error deleting transaction:', error)
-        alert('Ошибка при удалении транзакции')
-      }
-    }
-
-    const resetFilters = () => {
-      filters.value = {
-        type: '',
-        month: new Date().toISOString().slice(0, 7),
-        includeAnomalies: false
-      }
-      fetchTransactions()
-    }
-
-    // Computed properties для сводки (суммы в BYN)
-    const filteredStats = computed(() => {
-      let income = 0
-      let expenses = 0
-
-      transactions.value.forEach(transaction => {
-        // Используем amount_in_byn если есть, иначе конвертируем через курс
-        let amountInByn = transaction.amount_in_byn || transaction.amount
-
-        // Если нет amount_in_byn, но есть курс
-        if (!transaction.amount_in_byn && transaction.exchange_rate) {
-          amountInByn = transaction.amount * transaction.exchange_rate
-        }
-
-        if (transaction.type === 'income') {
-          income += parseFloat(amountInByn) || 0
-        } else if (transaction.type === 'expense') {
-          expenses += parseFloat(amountInByn) || 0
-        }
-      })
-
-      return { income, expenses, balance: income - expenses }
-    })
-
-    const filteredBalanceClass = computed(() => {
-      const balance = filteredStats.value.balance
-      if (balance > 0) return 'positive'
-      if (balance < 0) return 'negative'
-      return 'neutral'
-    })
-
-    onMounted(() => {
-      fetchTransactions()
-    })
+    const { formatDate } = useDateFormatter()
+    const { getPaymentMethodLabel } = usePaymentMethod()
 
     return {
       transactions,
@@ -464,12 +311,12 @@ export default {
       editTransaction,
       deleteTransaction,
       resetFilters,
+      getCurrencyCode,
+      formatRate,
       formatTransactionMoney,
       formatMoneyAmount,
-      formatRate,
       formatDate,
-      getPaymentMethodLabel,
-      getCurrencyCode
+      getPaymentMethodLabel
     }
   }
 }

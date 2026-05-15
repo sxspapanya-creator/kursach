@@ -253,6 +253,78 @@
     font-weight: 500;
 }
 
+/* Валюты */
+.currencies-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.75rem;
+}
+
+.currency-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.currency-option:hover {
+    border-color: #cbd5e1;
+    transform: translateY(-2px);
+}
+
+.currency-option.selected {
+    border-color: #3b82f6;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(59, 130, 246, 0.02) 100%);
+}
+
+.currency-flag {
+    font-size: 1.5rem;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.currency-name {
+    flex: 1;
+    font-weight: 500;
+    color: #1e293b;
+    font-size: 0.875rem;
+    margin-left: 0.5rem;
+}
+
+.currency-rate {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #3b82f6;
+}
+
+.currency-check {
+    color: #3b82f6;
+    flex-shrink: 0;
+}
+
+.no-currencies {
+    text-align: center;
+    padding: 2rem;
+    background: #f8fafc;
+    border-radius: 12px;
+    border: 2px dashed #e2e8f0;
+}
+
+.no-currencies-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 1rem;
+    color: #94a3b8;
+}
+
 /* Категории */
 .no-categories {
     text-align: center;
@@ -282,15 +354,15 @@
 
 .category-option {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
     gap: 0.5rem;
-    padding: 1rem;
+    padding: 0.75rem;
     border: 2px solid #e2e8f0;
     border-radius: 10px;
     cursor: pointer;
     transition: all 0.2s;
     position: relative;
-    min-height: 80px;
 }
 
 .category-option:hover {
@@ -306,35 +378,26 @@
 .category-info {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.5rem;
+    flex: 1;
 }
 
 .category-color {
-    width: 16px;
-    height: 16px;
-    border-radius: 4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
     flex-shrink: 0;
 }
 
 .category-name {
-    font-weight: 600;
+    font-weight: 500;
     color: #1e293b;
     font-size: 0.875rem;
 }
 
-.category-budget {
-    font-size: 0.75rem;
-    color: #64748b;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
 .category-check {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
     color: #3b82f6;
+    flex-shrink: 0;
 }
 
 /* Детали формы */
@@ -407,6 +470,16 @@
     background: #e2e8f0;
 }
 
+.date-today:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.date-disabled {
+    border-color: #ef4444;
+    background-color: #fef2f2;
+}
+
 .payment-methods {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
@@ -475,6 +548,12 @@
     color: #92400e;
     margin: 0;
     line-height: 1.4;
+}
+
+.field-hint {
+    font-size: 0.75rem;
+    color: #d97706;
+    margin-top: 0.5rem;
 }
 
 /* Карточка ошибки */
@@ -614,28 +693,25 @@
         right: 1.25rem;
     }
 
+    .currencies-grid {
+        grid-template-columns: 1fr;
+    }
+
     .categories-grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-        gap: 0.75rem;
     }
 
     .payment-methods {
         grid-template-columns: repeat(2, 1fr);
-        gap: 0.75rem;
     }
 
     .form-actions {
         flex-direction: column;
-        gap: 0.75rem;
     }
 
     .btn {
         width: 100%;
         justify-content: center;
-    }
-
-    .section-title {
-        font-size: 1.125rem;
     }
 }
 
@@ -652,91 +728,19 @@
         font-size: 1.5rem;
     }
 
+    .currencies-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .currency-option {
+        padding: 0.75rem;
+    }
+
     .categories-grid {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: 1fr;
     }
 
     .payment-methods {
         grid-template-columns: 1fr;
-    }
-
-
-    /* Добавленные стили для валют */
-    .currencies-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-        gap: 0.75rem;
-    }
-
-    .currency-option {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.25rem;
-        padding: 0.75rem 1rem;
-        border: 2px solid #e2e8f0;
-        border-radius: 12px;
-        cursor: pointer;
-        transition: all 0.2s;
-        position: relative;
-    }
-
-    .currency-option:hover {
-        border-color: #cbd5e1;
-        transform: translateY(-2px);
-    }
-
-    .currency-option.selected {
-        border-color: #3b82f6;
-        background: rgba(59, 130, 246, 0.05);
-    }
-
-    .currency-flag {
-        font-size: 1.5rem;
-    }
-
-    .currency-name {
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: #1e293b;
-        text-align: center;
-    }
-
-    .currency-rate {
-        font-size: 0.75rem;
-        color: #64748b;
-    }
-
-    .currency-check {
-        position: absolute;
-        top: 0.5rem;
-        right: 0.5rem;
-        color: #3b82f6;
-    }
-
-    .no-currencies {
-        text-align: center;
-        padding: 2rem;
-        background: #f8fafc;
-        border-radius: 12px;
-        border: 2px dashed #e2e8f0;
-    }
-
-    .no-currencies-icon {
-        width: 64px;
-        height: 64px;
-        margin: 0 auto 1rem;
-        color: #94a3b8;
-    }
-
-    .field-hint {
-        font-size: 0.75rem;
-        color: #d97706;
-        margin-top: 0.5rem;
-    }
-
-    .date-disabled {
-        border-color: #ef4444;
-        background-color: #fef2f2;
     }
 }
