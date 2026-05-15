@@ -171,6 +171,7 @@ class AnalyticsService implements AnalyticsServiceInterface
         }
 
         // Формируем массив помесячных расходов
+        // Формируем массив помесячных расходов (ТОЛЬКО полные месяцы)
         $transactionsByMonth = $transactionsForForecast->groupBy(fn($t) => $t->date->format('Y-m'));
         $ratesCache = $this->currencyConverter->loadRatesForTransactions($transactionsForForecast);
 
@@ -180,6 +181,12 @@ class AnalyticsService implements AnalyticsServiceInterface
         for ($i = 29; $i >= 0; $i--) {
             $date = $now->copy()->subMonths($i);
             $monthKey = $date->format('Y-m');
+
+            // ⚠️ ПРОПУСКАЕМ текущий неполный месяц
+            if ($date->year == $now->year && $date->month == $now->month) {
+                continue;
+            }
+
             $monthTransactions = $transactionsByMonth[$monthKey] ?? collect();
 
             $total = 0;

@@ -72,7 +72,6 @@ class AnomalyService
 
         return $result;
     }
-
     /**
      * Возвращает транзакции для прогноза
      * Учитывает ТОЛЬКО is_anomaly из БД
@@ -80,12 +79,9 @@ class AnomalyService
     public function getCleanTransactions(Collection $transactions): Collection
     {
         return $transactions->filter(function ($transaction) {
-            // Если пользователь отметил "это аномалия" - исключаем из прогноза
-            if ($transaction->is_anomaly === true) {
-                return false;
-            }
-            // Во всех остальных случаях (false или null) - включаем в прогноз
-            return true;
+            // Включаем в прогноз ТОЛЬКО если пользователь ЯВНО снял отметку (is_anomaly === false)
+            // Все остальные (null или true) - исключаем из прогноза
+            return $transaction->is_anomaly === false;
         });
     }
 
