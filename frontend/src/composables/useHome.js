@@ -1,9 +1,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import { useCurrencies } from './useCurrencies'
+import { useDateFormatter } from './useDateFormatter'
 
 export function useHome() {
     const router = useRouter()
+    const { getCurrencySymbol, getAmountInByn, formatMoneyAmount, formatTransactionMoney } = useCurrencies()
+    const { formatDate: formatDateSimple } = useDateFormatter()
 
     const stats = ref({
         totalIncome: 0,
@@ -18,28 +22,6 @@ export function useHome() {
     const loading = ref(true)
     const error = ref(null)
 
-    const getCurrencySymbol = (currencyCode) => {
-        const symbols = {
-            'BYN': 'Br',
-            'RUB': '₽',
-            'USD': '$',
-            'EUR': '€',
-            'CNY': '¥'
-        }
-        return symbols[currencyCode] || 'Br'
-    }
-
-    const getAmountInByn = (transaction) => {
-        if (!transaction) return 0
-        if (transaction.amount_in_byn !== null && transaction.amount_in_byn !== undefined) {
-            return parseFloat(transaction.amount_in_byn) || 0
-        }
-        if (transaction.exchange_rate) {
-            return (parseFloat(transaction.amount) || 0) * parseFloat(transaction.exchange_rate)
-        }
-        return parseFloat(transaction.amount) || 0
-    }
-
     const formatMoneyWithCurrency = (amount, currencyCode = 'BYN') => {
         if (amount === null || amount === undefined || isNaN(amount)) return `0 ${getCurrencySymbol(currencyCode)}`
         const symbol = getCurrencySymbol(currencyCode)
@@ -49,32 +31,12 @@ export function useHome() {
         }).format(amount) + ' ' + symbol
     }
 
-    const formatMoneyAmount = (amount) => {
-        if (amount === null || amount === undefined || isNaN(amount)) return '0'
-        return new Intl.NumberFormat('ru-RU', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        }).format(amount)
-    }
-
-    const formatTransactionMoney = (transaction) => {
-        if (!transaction) return '0 Br'
-        const amount = transaction.amount || 0
-        const currencyCode = transaction.currency?.code || 'BYN'
-        const currencySymbol = getCurrencySymbol(currencyCode)
-        return new Intl.NumberFormat('ru-RU', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        }).format(amount) + ' ' + currencySymbol
-    }
-
     const formatDate = (dateString) => {
         if (!dateString) return 'Дата не указана'
         try {
             const date = new Date(dateString)
             const now = new Date()
-            const diffTime = Math.abs(now - date)
-            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+            const diffDays = Math.floor(Math.abs(now - date) / (1000 * 60 * 60 * 24))
 
             if (date.toDateString() === now.toDateString()) return 'Сегодня'
             const yesterday = new Date(now)
@@ -83,12 +45,8 @@ export function useHome() {
             if (diffDays <= 7) {
                 return date.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric' })
             }
-            return date.toLocaleDateString('ru-RU', {
-                day: 'numeric',
-                month: 'short',
-                year: diffDays > 365 ? 'numeric' : undefined
-            })
-        } catch (error) {
+            return formatDateSimple(dateString)
+        } catch {
             return 'Неверная дата'
         }
     }
@@ -229,7 +187,6 @@ export function useHome() {
             stats.value.monthlyExpenses = monthlyExpenses
             stats.value.monthlyBalance = monthlyIncome - monthlyExpenses
 
-            // ТРЕНДЫ
             const monthlyMap = new Map()
             allTransactions.forEach(transaction => {
                 if (!transaction.date) return
@@ -313,20 +270,15 @@ export function useHome() {
     })
 
     return {
-        // Состояния
         stats,
         monthlyTrends,
         recentTransactions,
         loading,
         error,
-
-        // Вычисляемые
         totalBalance,
         balanceClass,
         totalBalanceClass,
         monthlyTrendsProcessed,
-
-        // Методы
         getBalanceClass,
         formatMoneyWithCurrency,
         formatMoneyAmount,

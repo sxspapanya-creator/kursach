@@ -24,6 +24,12 @@ export function useProfile() {
         syncTabFromRoute()
     })
 
+    watch(() => activeTab.value, (tab) => {
+        if (tab === 'subscription') {
+            subscription.fetchPlans()
+        }
+    })
+
     const user = ref({})
     const form = ref({
         name: '',
@@ -57,6 +63,20 @@ export function useProfile() {
     const passwordError = ref('')
 
     const subscription = useSubscription(user)
+    const loadUserFromStorage = () => {
+        try {
+            const userStr = localStorage.getItem('user')
+            if (userStr) {
+                const userData = JSON.parse(userStr)
+                user.value = userData
+                form.value.name = userData.name || ''
+                form.value.email = userData.email || ''
+                form.value.salary_day = userData.salary_day || 25
+            }
+        } catch (err) {
+            console.error('Error loading user from storage:', err)
+        }
+    }
 
     const fetchUser = async () => {
         try {
@@ -132,7 +152,6 @@ export function useProfile() {
     }
 
     const changePassword = async () => {
-        // Валидация перед отправкой
         if (!passwordForm.value.current_password) {
             passwordError.value = 'Введите текущий пароль'
             return
@@ -219,8 +238,12 @@ export function useProfile() {
         subscription.selectPlan(plan, fetchUser)
     }
 
-    const init = async () => {
-        await fetchUser()
+    const init = async (skipFetch = true) => {
+        if (skipFetch) {
+            loadUserFromStorage()
+        } else {
+            await fetchUser()
+        }
         syncTabFromRoute()
     }
 

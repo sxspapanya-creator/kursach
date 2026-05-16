@@ -265,39 +265,20 @@
 <script>
 import { onMounted } from 'vue'
 import { useTransactions } from '../composables/useTransactions.js'
-import { useCurrencies } from '../composables/useCurrencies'
 import { useDateFormatter } from '../composables/useDateFormatter'
 
 export default {
   name: 'TransactionList',
   setup() {
-    const transactionsCore = useTransactions()
-    const currencies = useCurrencies()
+    const transactions = useTransactions()
     const { formatDate } = useDateFormatter()
 
     onMounted(() => {
-      transactionsCore.fetchTransactions()
+      transactions.fetchTransactions()
     })
 
     return {
-      // Из transactionsCore
-      transactions: transactionsCore.transactions,
-      loading: transactionsCore.loading,
-      filters: transactionsCore.filters,
-      filteredStats: transactionsCore.filteredStats,
-      filteredBalanceClass: transactionsCore.filteredBalanceClass,
-      fetchTransactions: transactionsCore.fetchTransactions,
-      editTransaction: transactionsCore.editTransaction,
-      deleteTransaction: transactionsCore.deleteTransaction,
-      resetFilters: transactionsCore.resetFilters,
-
-      // Форматирование из useCurrencies
-      formatTransactionMoney: currencies.formatTransactionMoney,
-      formatMoneyAmount: currencies.formatMoneyAmount,
-      getCurrencyCode: currencies.getCurrencyCode,
-      formatRate: currencies.formatRate,
-
-      // Другие форматирования
+      ...transactions,
       formatDate,
     }
   }

@@ -115,7 +115,7 @@ const router = createRouter({
     routes
 })
 
-const { setupRouterGuards } = useAuth()
+const { setupRouterGuards } = useAuth(router)
 setupRouterGuards(router)
 
 export default router

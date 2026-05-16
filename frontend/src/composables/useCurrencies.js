@@ -63,6 +63,17 @@ export function useCurrencies() {
         return currencyIds[currencyId] || 'BYN'
     }
 
+    const getAmountInByn = (transaction) => {
+        if (!transaction) return 0
+        if (transaction.amount_in_byn !== null && transaction.amount_in_byn !== undefined) {
+            return parseFloat(transaction.amount_in_byn) || 0
+        }
+        if (transaction.exchange_rate) {
+            return (parseFloat(transaction.amount) || 0) * parseFloat(transaction.exchange_rate)
+        }
+        return parseFloat(transaction.amount) || 0
+    }
+
     const setDateRange = (monthsBack = 6) => {
         const today = new Date()
         const past = new Date()
@@ -142,31 +153,23 @@ export function useCurrencies() {
     }
 
     return {
-        // Состояния
         currencies,
         loading,
         availableDates,
         allDatesAllowed,
         minDate,
         maxDate,
-
-        // Вычисляемые
         availableDatesHint,
-
-        // Методы валют
         fetchCurrencies,
         getCurrencyById,
         getCurrencySymbol,
         getCurrencyFlag,
         getCurrencyCode,
-
-        // Методы дат
+        getAmountInByn,
         setDateRange,
         fetchAvailableDates,
         isDateAvailable,
         validateDate,
-
-        // Методы форматирования
         formatRate,
         formatTransactionMoney,
         formatMoneyAmount

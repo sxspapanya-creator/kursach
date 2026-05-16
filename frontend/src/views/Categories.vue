@@ -261,7 +261,7 @@
                     <rect x="1" y="4" width="22" height="16" rx="2"/>
                     <line x1="1" y1="10" x2="23" y2="10"/>
                   </svg>
-                  Всего транзакций
+                  В этом месяце
                 </div>
                 <div class="stat-value">{{ category.transaction_count || 0 }}</div>
               </div>
@@ -274,7 +274,7 @@
                     <line x1="8" y1="2" x2="8" y2="6"/>
                     <line x1="3" y1="10" x2="21" y2="10"/>
                   </svg>
-                  Текущий месяц
+                  Сумма
                 </div>
                 <div class="stat-value" :class="category.type">{{ formatMoney(category.total_amount || 0) }}</div>
               </div>

@@ -1,11 +1,10 @@
 import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
 
 const USER_UPDATED_EVENT = 'user-updated'
 const USER_LOGOUT_EVENT = 'user-logout'
 
-export function useAuth() {
-    const router = useRouter()
+export function useAuth(router = null) {
+    let routerInstance = router
 
     const isAuthenticated = ref(!!localStorage.getItem('user'))
     const userCacheVersion = ref(0)
@@ -65,12 +64,16 @@ export function useAuth() {
             localStorage.removeItem('user')
             isAuthenticated.value = false
             window.dispatchEvent(new CustomEvent(USER_LOGOUT_EVENT))
-            router.push('/login')
+            if (routerInstance) {
+                routerInstance.push('/login')
+            }
         } catch (error) {
             localStorage.removeItem('user')
             isAuthenticated.value = false
             window.dispatchEvent(new CustomEvent(USER_LOGOUT_EVENT))
-            router.push('/login')
+            if (routerInstance) {
+                routerInstance.push('/login')
+            }
         }
     }
 

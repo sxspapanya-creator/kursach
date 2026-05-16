@@ -234,7 +234,7 @@ export default {
   name: 'Profile',
   setup() {
     const profile = useProfile()
-    profile.init() // Нужно вызвать init
+    profile.init(true)
     return profile
   }
 }

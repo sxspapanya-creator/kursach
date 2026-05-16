@@ -65,17 +65,16 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuth } from './composables/useAuth'
-import { useNotification } from './composables/useNotifications'
+import { useNotification } from './composables/useNotification'
 import { useNavigation } from './composables/useNavigation'
 
 export default {
   name: 'App',
   setup() {
     const router = useRouter()
-    const route = useRoute()
 
     const {
       isAuthenticated,
@@ -83,45 +82,53 @@ export default {
       userName,
       userEmail,
       hasPremiumPlan,
-      syncWithApi,
       logout,
       registerEventListeners,
       unregisterEventListeners
     } = useAuth()
 
-    const { notification, hideNotification, success, error: notifyError } = useNotification()
+    const {
+      notification,
+      hideNotification,
+      showNotification,
+      success,
+      error: notifyError,
+      info,
+      warning
+    } = useNotification()
+
     const { showNavbar: getShowNavbar, getFilteredNavLinks } = useNavigation()
 
-    // Вычисляемые свойства
     const showNavbar = computed(() => getShowNavbar(isAuthenticated.value))
     const filteredNavLinks = computed(() => getFilteredNavLinks(hasPremiumPlan.value))
 
-    // Методы
     const goToProfile = () => {
       router.push('/profile')
     }
 
     const handleLogout = async () => {
-      const result = await logout()
-      if (result.message) {
-        success(result.message)
+      await logout()
+      success('Вы успешно вышли из системы')
+    }
+
+    const setupGlobalNotification = () => {
+      window.showNotification = (type, message, duration = 5000) => {
+        if (type === 'success') success(message, duration)
+        else if (type === 'error') notifyError(message, duration)
+        else if (type === 'warning') warning(message, duration)
+        else if (type === 'info') info(message, duration)
+        else showNotification(type, message, duration)
       }
     }
 
-    // Обновление при смене маршрута
-    watch(() => route.fullPath, () => {
-      if (route.path !== '/login' && route.path !== '/register') {
-        // перечитываем пользователя при смене маршрута (если нужно)
-      }
-    })
-
-    onMounted(async () => {
+    onMounted(() => {
       registerEventListeners()
-      await syncWithApi()
+      setupGlobalNotification()
     })
 
     onUnmounted(() => {
       unregisterEventListeners()
+      delete window.showNotification
     })
 
     return {

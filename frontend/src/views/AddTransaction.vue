@@ -265,19 +265,18 @@
 <script>
 import { onMounted } from 'vue'
 import { useTransactions } from '../composables/useTransactions.js'
-import { useCurrencies } from '../composables/useCurrencies'
 
 export default {
   name: 'AddTransaction',
   setup() {
     const transactionsCore = useTransactions()
-    const { getCurrencyFlag, formatRate } = useCurrencies()
 
     onMounted(() => {
       transactionsCore.init()
     })
 
     return {
+      // Все данные и методы из useTransactions
       form: transactionsCore.form,
       loading: transactionsCore.loading,
       error: transactionsCore.error,
@@ -292,6 +291,7 @@ export default {
       isFormValid: transactionsCore.isFormValid,
       isDateUnavailable: transactionsCore.isDateUnavailable,
 
+      // Методы
       validateAmount: transactionsCore.validateAmount,
       toggleCategory: transactionsCore.toggleCategory,
       submitTransaction: transactionsCore.submitTransaction,
@@ -299,8 +299,9 @@ export default {
       setTodayDate: transactionsCore.setTodayDate,
       validateDate: transactionsCore.validateDate,
 
-      getCurrencyFlag,
-      formatRate
+      // Вспомогательные методы из useTransactions
+      getCurrencyFlag: transactionsCore.getCurrencyFlag,
+      formatRate: transactionsCore.formatRate
     }
   }
 }

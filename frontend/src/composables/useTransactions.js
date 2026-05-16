@@ -6,6 +6,11 @@ export function useTransactions() {
     const router = useRouter()
     const route = useRoute()
 
+    // Флаги для предотвращения дублирования запросов
+    let initialized = false
+    let loadingCurrencies = false
+    let loadingCategories = false
+
     const loading = ref(false)
     const submitting = ref(false)
     const error = ref('')
@@ -46,6 +51,39 @@ export function useTransactions() {
     const allDatesAllowed = ref(false)
     const minDate = ref('')
     const maxDate = ref('')
+
+    // ========== МЕТОДЫ ФОРМАТИРОВАНИЯ ==========
+    const getCurrencyCode = (currencyId) => {
+        const codes = { 1: 'BYN', 2: 'RUB', 3: 'USD', 4: 'EUR', 5: 'CNY' }
+        return codes[currencyId] || 'BYN'
+    }
+
+    const formatMoneyAmount = (amount) => {
+        if (amount === null || amount === undefined || isNaN(amount)) return '0'
+        return new Intl.NumberFormat('ru-RU', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(amount)
+    }
+
+    const formatTransactionMoney = (transaction) => {
+        if (!transaction) return '0 Br'
+        const amount = transaction.amount || 0
+        const currencyCode = transaction.currency?.code || getCurrencyCode(transaction.currency_id)
+        const symbols = { 'BYN': 'Br', 'RUB': '₽', 'USD': '$', 'EUR': '€', 'CNY': '¥' }
+        const symbol = symbols[currencyCode] || 'Br'
+        return formatMoneyAmount(amount) + ' ' + symbol
+    }
+
+    const formatRate = (rate) => {
+        if (!rate && rate !== 0) return '0.0000'
+        return Number(rate).toFixed(4)
+    }
+
+    const getCurrencyFlag = (code) => {
+        const flags = { 'BYN': '🇧🇾', 'RUB': '🇷🇺', 'USD': '🇺🇸', 'EUR': '🇪🇺', 'CNY': '🇨🇳' }
+        return flags[code] || '💰'
+    }
 
     const filteredCategories = computed(() => {
         return categories.value
@@ -173,28 +211,57 @@ export function useTransactions() {
     const selectCurrency = async (currency) => {
         form.value.currency_id = currency.id
         await fetchDatesForCurrency(currency.id)
+        await reloadRatesForDate(form.value.date)
+    }
+
+    const reloadRatesForDate = async (date) => {
+        if (!date) return
+        try {
+            const response = await axios.get('/api/currencies', {
+                params: { date }
+            })
+            const newRates = response.data.data || []
+            currencies.value = currencies.value.map(currency => {
+                const newRate = newRates.find(r => r.id === currency.id)
+                if (newRate && newRate.rate !== undefined) {
+                    return { ...currency, rate: newRate.rate }
+                }
+                return currency
+            })
+        } catch (err) {
+            console.error('Error reloading rates:', err)
+        }
     }
 
     const loadCurrencies = async () => {
+        if (loadingCurrencies) return
+        loadingCurrencies = true
         try {
-            const response = await axios.get('/api/currencies')
+            const response = await axios.get('/api/currencies', {
+                params: { date: form.value.date }
+            })
             currencies.value = response.data.data || []
             const defaultCurrency = currencies.value.find(c => c.code === 'BYN')
-            if (defaultCurrency) {
+            if (defaultCurrency && !form.value.currency_id) {
                 form.value.currency_id = defaultCurrency.id
-                await fetchDatesForCurrency(defaultCurrency.id)
             }
         } catch (err) {
             console.error('Error fetching currencies:', err)
+        } finally {
+            loadingCurrencies = false
         }
     }
 
     const loadCategories = async () => {
+        if (loadingCategories) return
+        loadingCategories = true
         try {
             const response = await axios.get('/api/categories')
             categories.value = response.data.data || []
         } catch (err) {
             console.error('Error fetching categories:', err)
+        } finally {
+            loadingCategories = false
         }
     }
 
@@ -251,6 +318,7 @@ export function useTransactions() {
 
             if (data.currency_id) {
                 await fetchDatesForCurrency(data.currency_id)
+                await reloadRatesForDate(form.value.date)
             }
             validateDate()
         } catch (err) {
@@ -336,16 +404,6 @@ export function useTransactions() {
         fetchTransactions()
     }
 
-    const getCurrencyFlag = (code) => {
-        const flags = { 'BYN': '🇧🇾', 'RUB': '🇷🇺', 'USD': '🇺🇸', 'EUR': '🇪🇺', 'CNY': '🇨🇳' }
-        return flags[code] || '💰'
-    }
-
-    const formatRate = (rate) => {
-        if (!rate && rate !== 0) return '0.0000'
-        return Number(rate).toFixed(4)
-    }
-
     const resetForm = () => {
         form.value = {
             amount: '',
@@ -362,27 +420,28 @@ export function useTransactions() {
     }
 
     const init = async () => {
+        if (initialized) return
+        initialized = true
         setDateRange()
         await loadCategories()
         await loadCurrencies()
     }
 
-    watch(() => form.value.type, () => {
-        form.value.category_ids = []
+    watch(() => form.value.date, async (newDate, oldDate) => {
+        if (newDate && newDate !== oldDate && currencies.value.length > 0) {
+            await reloadRatesForDate(newDate)
+            validateDate()
+        }
     })
 
-    watch(() => form.value.date, () => {
-        validateDate()
+    watch(() => form.value.type, () => {
+        form.value.category_ids = []
     })
 
     watch(() => form.value.currency_id, (newVal, oldVal) => {
         if (newVal && newVal !== oldVal) {
             fetchDatesForCurrency(newVal)
         }
-    })
-
-    onMounted(() => {
-        init()
     })
 
     return {
@@ -421,6 +480,10 @@ export function useTransactions() {
         resetFilters,
         getCurrencyFlag,
         formatRate,
-        init
+        formatMoneyAmount,
+        formatTransactionMoney,
+        getCurrencyCode,
+        init,
+        reloadRatesForDate
     }
 }

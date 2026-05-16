@@ -274,18 +274,61 @@
 </template>
 
 <script>
+import { onMounted } from 'vue'
 import { useTransactions } from '../composables/useTransactions'
+import { useCurrencies } from '../composables/useCurrencies'
 
 export default {
   name: 'EditTransaction',
   props: {
     id: {
-      type: [String, Number],
+      type: Number,  // ← меняем на Number
       required: true
     }
   },
   setup(props) {
-    return useTransactions(props)
+    const transactions = useTransactions()
+    const { getCurrencyFlag, formatRate } = useCurrencies()
+
+    onMounted(() => {
+      transactions.init()
+      transactions.fetchTransaction(props.id)
+    })
+
+    const updateTransaction = () => {
+      transactions.updateTransaction(props.id)
+    }
+
+    return {
+      // Состояния
+      loading: transactions.loading,
+      submitting: transactions.submitting,
+      error: transactions.error,
+      amountError: transactions.amountError,
+      dateError: transactions.dateError,
+      currencies: transactions.currencies,
+      categories: transactions.categories,
+      paymentMethods: transactions.paymentMethods,
+      form: transactions.form,
+      minDate: transactions.minDate,
+      maxDate: transactions.maxDate,
+      filteredCategories: transactions.filteredCategories,
+      currentCurrencySymbol: transactions.currentCurrencySymbol,
+      isFormValid: transactions.isFormValid,
+      isDateUnavailable: transactions.isDateUnavailable,
+
+      // Методы
+      validateAmount: transactions.validateAmount,
+      toggleCategory: transactions.toggleCategory,
+      selectCurrency: transactions.selectCurrency,
+      setTodayDate: transactions.setTodayDate,
+      validateDate: transactions.validateDate,
+      updateTransaction,
+
+      // Вспомогательные
+      getCurrencyFlag,
+      formatRate
+    }
   }
 }
 </script>
