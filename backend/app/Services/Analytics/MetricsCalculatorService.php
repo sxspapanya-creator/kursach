@@ -102,8 +102,7 @@ class MetricsCalculatorService
         $secondHalf = array_sum(array_slice($data, floor($n / 2))) / ceil($n / 2);
         if ($firstHalf == 0) return 1.0;
 
-        $trend = $secondHalf / $firstHalf;
-        return max(0.95, min(1.05, $trend));
+        return $secondHalf / $firstHalf;  // ← убрать max/min
     }
 
     /**

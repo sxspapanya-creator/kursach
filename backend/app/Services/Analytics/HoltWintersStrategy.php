@@ -34,26 +34,37 @@ class HoltWintersStrategy extends BaseForecastStrategy
         $n = count($data);
         if ($n < 12) return INF;
 
+        // Используем ВСЕ данные для расчета, не только последние 30%
         list($level, $trend, $seasonality) = $this->initHoltWinters($data, $alpha, $beta, $gamma);
         $errors = [];
         $validCount = 0;
 
-        for ($t = 0; $t < $n; $t++) {
+        // Обучаем на 70% данных
+        $trainSize = floor($n * 0.7);
+
+        for ($t = 0; $t < $trainSize; $t++) {
             $oldLevel = $level;
             $level = $alpha * $data[$t] + (1 - $alpha) * ($level + $trend);
             $trend = $beta * ($level - $oldLevel) + (1 - $beta) * $trend;
             $seasonIndex = $t % $this->seasonalPeriod;
-
-            if ($t > $n * 0.7) {
-                $predicted = ($oldLevel + $trend) * $seasonality[$seasonIndex];
-                if ($data[$t] > 0) {
-                    $errors[] = abs(($data[$t] - $predicted) / $data[$t]);
-                    $validCount++;
-                }
-            }
-
             $seasonality[$seasonIndex] = $gamma * ($data[$t] / $level) + (1 - $gamma) * $seasonality[$seasonIndex];
         }
+
+        // Тестируем на оставшихся 30%
+        for ($t = $trainSize; $t < $n; $t++) {
+            $predicted = ($level + $trend) * $seasonality[$t % $this->seasonalPeriod];
+            if ($data[$t] > 0) {
+                $errors[] = abs(($data[$t] - $predicted) / $data[$t]);
+                $validCount++;
+            }
+            // Продолжаем обновлять для следующего шага
+            $oldLevel = $level;
+            $level = $alpha * $data[$t] + (1 - $alpha) * ($level + $trend);
+            $trend = $beta * ($level - $oldLevel) + (1 - $beta) * $trend;
+            $seasonIndex = $t % $this->seasonalPeriod;
+            $seasonality[$seasonIndex] = $gamma * ($data[$t] / $level) + (1 - $gamma) * $seasonality[$seasonIndex];
+        }
+
         return $validCount > 0 ? (array_sum($errors) / $validCount) * 100 : INF;
     }
 

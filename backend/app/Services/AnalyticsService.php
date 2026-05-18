@@ -40,7 +40,6 @@ class AnalyticsService implements AnalyticsServiceInterface
      */
     public function analyze(User $user): array
     {
-        // Можно объединить overview и forecast
         return [
             'overview' => $this->getOverview($user->id, 'month', date('Y'), date('m')),
             'forecast' => $this->getForecast($user->id)
@@ -60,14 +59,12 @@ class AnalyticsService implements AnalyticsServiceInterface
             ? Carbon::create($year, 12, 31)->endOfYear()
             : $startDate->copy()->endOfMonth();
 
-        // Доходы
         $incomeTransactions = Transaction::where('user_id', $userId)
             ->where('type', 'income')
             ->whereBetween('date', [$startDate, $endDate])
             ->with(['currency'])
             ->get();
 
-        // Расходы (все, включая аномалии)
         $expenseTransactions = Transaction::where('user_id', $userId)
             ->where('type', 'expense')
             ->whereBetween('date', [$startDate, $endDate])
@@ -144,7 +141,6 @@ class AnalyticsService implements AnalyticsServiceInterface
      */
     public function getForecast(int $userId): array
     {
-        // Получаем ВСЕ транзакции расходов
         $allTransactions = Transaction::where('user_id', $userId)
             ->where('type', 'expense')
             ->with(['categories', 'currency'])
@@ -157,10 +153,7 @@ class AnalyticsService implements AnalyticsServiceInterface
             ];
         }
 
-        // Аномалии для отображения
         $anomaliesList = $this->anomalyService->getAnomaliesList($allTransactions);
-
-        // Транзакции для прогноза (без ручных аномалий)
         $transactionsForForecast = $this->anomalyService->getCleanTransactions($allTransactions);
 
         if ($transactionsForForecast->isEmpty()) {
@@ -170,8 +163,6 @@ class AnalyticsService implements AnalyticsServiceInterface
             ];
         }
 
-        // Формируем массив помесячных расходов
-        // Формируем массив помесячных расходов (ТОЛЬКО полные месяцы)
         $transactionsByMonth = $transactionsForForecast->groupBy(fn($t) => $t->date->format('Y-m'));
         $ratesCache = $this->currencyConverter->loadRatesForTransactions($transactionsForForecast);
 
@@ -182,7 +173,6 @@ class AnalyticsService implements AnalyticsServiceInterface
             $date = $now->copy()->subMonths($i);
             $monthKey = $date->format('Y-m');
 
-            // ⚠️ ПРОПУСКАЕМ текущий неполный месяц
             if ($date->year == $now->year && $date->month == $now->month) {
                 continue;
             }
@@ -211,7 +201,6 @@ class AnalyticsService implements AnalyticsServiceInterface
             ];
         }
 
-        // Выполняем прогноз
         $monthlyForecast = $this->forecastService->forecast($monthlyExpenses, 3);
         $strategy = $this->forecastService->getStrategy($monthsCount);
 
@@ -223,7 +212,6 @@ class AnalyticsService implements AnalyticsServiceInterface
             ];
         }
 
-        // Формируем остальные данные
         $remainingMonth = $this->forecastRemainingCurrentMonth($userId);
         $nextMonthDate = Carbon::now()->addMonth()->startOfMonth();
         $lastCompleteMonthTotal = end($monthlyExpenses);
@@ -242,11 +230,10 @@ class AnalyticsService implements AnalyticsServiceInterface
         $trend = $this->metricsCalculator->calculateTrend($monthlyExpenses);
         $seasonalFactor = $this->calculateSeasonalFactor($userId, $monthlyExpenses);
 
-        // Прогнозы по категориям
-        $categoryForecasts = $this->categoryAnalysis->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $trend);
-        $secondMonthCategoryForecasts = $this->categoryAnalysis->getCategoryForecasts($userId, $dailyBaseline, $seasonalFactor, $trend * $trend);
+        // ========== ИСПРАВЛЕНО: Прогнозы по категориям через распределение общего прогноза ==========
+        $categoryForecasts = $this->distributeForecastByCategories($userId, $monthlyForecast[0]);
+        $secondMonthCategoryForecasts = $this->distributeForecastByCategories($userId, $monthlyForecast[1] ?? $monthlyForecast[0]);
 
-        // Коэффициент вариации
         $cvData = $this->metricsCalculator->calculateCoefficientOfVariation($monthlyExpenses);
         $modelMetrics = $this->metricsCalculator->calculateModelMetrics($monthlyExpenses, $monthlyForecast);
 
@@ -270,6 +257,115 @@ class AnalyticsService implements AnalyticsServiceInterface
             'model_metrics' => $modelMetrics,
             'reliability_message' => $strategy->getReliabilityMessage()
         ];
+    }
+
+    /**
+     * НОВЫЙ МЕТОД: Распределение общего прогноза по категориям
+     */
+    private function distributeForecastByCategories(int $userId, float $totalForecast): array
+    {
+        $categoryShares = $this->getCategoryHistoricalShares($userId);
+
+        if (empty($categoryShares)) {
+            return [];
+        }
+
+        $forecasts = [];
+        foreach ($categoryShares as $category) {
+            $forecastAmount = $totalForecast * ($category['share'] / 100);
+
+            $forecasts[] = [
+                'category_id' => $category['id'],
+                'category_name' => $category['name'],
+                'color' => $category['color'],
+                'forecast' => round($forecastAmount, 2),
+                'daily_average' => round($forecastAmount / 30, 2),
+                'share_percent' => $category['share']
+            ];
+        }
+
+        usort($forecasts, fn($a, $b) => $b['forecast'] <=> $a['forecast']);
+
+        return array_slice($forecasts, 0, 10);
+    }
+
+    /**
+     * НОВЫЙ МЕТОД: Получение исторических долей категорий
+     */
+    private function getCategoryHistoricalShares(int $userId): array
+    {
+        $now = Carbon::now();
+        $totalExpenses = 0;
+        $categoryTotals = [];
+
+        $monthsToAnalyze = 3;
+        $monthsCollected = 0;
+
+        for ($i = 1; $i <= 6; $i++) {
+            if ($monthsCollected >= $monthsToAnalyze) {
+                break;
+            }
+
+            $date = $now->copy()->subMonths($i);
+
+            if ($date->year == $now->year && $date->month == $now->month) {
+                continue;
+            }
+
+            $monthStart = $date->copy()->startOfMonth();
+            $monthEnd = $date->copy()->endOfMonth();
+
+            $transactions = Transaction::where('user_id', $userId)
+                ->where('type', 'expense')
+                ->where('is_anomaly', false)
+                ->whereBetween('date', [$monthStart, $monthEnd])
+                ->with(['categories', 'currency'])
+                ->get();
+
+            if ($transactions->isEmpty()) {
+                continue;
+            }
+
+            $ratesCache = $this->currencyConverter->loadRatesForTransactions($transactions);
+
+            foreach ($transactions as $transaction) {
+                $amountInBase = $this->currencyConverter->convert($transaction, $ratesCache);
+                $totalExpenses += $amountInBase;
+
+                foreach ($transaction->categories as $category) {
+                    $catId = $category->id;
+                    if (!isset($categoryTotals[$catId])) {
+                        $categoryTotals[$catId] = [
+                            'id' => $catId,
+                            'name' => $category->name,
+                            'color' => $category->color ?? '#3498db',
+                            'total' => 0
+                        ];
+                    }
+                    $categoryTotals[$catId]['total'] += $amountInBase;
+                }
+            }
+
+            $monthsCollected++;
+        }
+
+        if ($totalExpenses <= 0 || empty($categoryTotals)) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($categoryTotals as $cat) {
+            $result[] = [
+                'id' => $cat['id'],
+                'name' => $cat['name'],
+                'color' => $cat['color'],
+                'share' => round(($cat['total'] / $totalExpenses) * 100, 1)
+            ];
+        }
+
+        usort($result, fn($a, $b) => $b['share'] <=> $a['share']);
+
+        return $result;
     }
 
     private function forecastRemainingCurrentMonth(int $userId): array
@@ -349,7 +445,6 @@ class AnalyticsService implements AnalyticsServiceInterface
             ->whereMonth('date', $month)
             ->get();
 
-        $baseCurrency = $this->currencyConverter->getBaseCurrency();
         $ratesCache = $this->currencyConverter->loadRatesForTransactions($transactions);
 
         $total = 0;
@@ -372,7 +467,6 @@ class AnalyticsService implements AnalyticsServiceInterface
 
         if ($transactions->count() < 10) return $defaultFactors;
 
-        $baseCurrency = $this->currencyConverter->getBaseCurrency();
         $ratesCache = $this->currencyConverter->loadRatesForTransactions($transactions);
         $dailyTotals = array_fill(0, 7, 0.0);
         $dailyWeights = array_fill(0, 7, 0.0);

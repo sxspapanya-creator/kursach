@@ -36,19 +36,30 @@ export function useAuth(router = null) {
 
     const syncWithApi = async () => {
         try {
-            const response = await fetch('/auth/user', { credentials: 'include' })
+            const response = await fetch('/auth/user', {
+                credentials: 'include',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
             const data = await response.json()
 
             if (data.authenticated && data.user) {
                 localStorage.setItem('user', JSON.stringify(data.user))
                 isAuthenticated.value = true
                 userCacheVersion.value++
+                return true
             } else if (data.authenticated === false) {
                 localStorage.removeItem('user')
                 isAuthenticated.value = false
                 userCacheVersion.value++
+                return false
             }
-        } catch (e) {}
+        } catch (e) {
+            console.error('Sync error:', e)
+            return false
+        }
     }
 
     const logout = async () => {
@@ -97,6 +108,16 @@ export function useAuth(router = null) {
     const registerEventListeners = () => {
         window.addEventListener(USER_UPDATED_EVENT, handleUserUpdated)
         window.addEventListener(USER_LOGOUT_EVENT, handleUserLogout)
+        window.addEventListener('load', () => {
+            const urlParams = new URLSearchParams(window.location.search)
+            if (urlParams.get('auth') === 'success') {
+                syncWithApi().then(() => {
+                    if (routerInstance) {
+                        routerInstance.push('/')
+                    }
+                })
+            }
+        })
     }
 
     const unregisterEventListeners = () => {

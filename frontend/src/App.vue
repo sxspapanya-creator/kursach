@@ -66,7 +66,7 @@
 
 <script>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from './composables/useAuth'
 import { useNotification } from './composables/useNotification'
 import { useNavigation } from './composables/useNavigation'
@@ -75,6 +75,7 @@ export default {
   name: 'App',
   setup() {
     const router = useRouter()
+    const route = useRoute()
 
     const {
       isAuthenticated,
@@ -84,8 +85,10 @@ export default {
       hasPremiumPlan,
       logout,
       registerEventListeners,
-      unregisterEventListeners
-    } = useAuth()
+      unregisterEventListeners,
+      syncWithApi,
+      updateUser
+    } = useAuth(router)
 
     const {
       notification,
@@ -97,9 +100,13 @@ export default {
       warning
     } = useNotification()
 
-    const { showNavbar: getShowNavbar, getFilteredNavLinks } = useNavigation()
+    const { getFilteredNavLinks } = useNavigation()
 
-    const showNavbar = computed(() => getShowNavbar(isAuthenticated.value))
+    const showNavbar = computed(() => {
+      const isGuestRoute = route.path === '/login' || route.path === '/register'
+      return isAuthenticated.value && !isGuestRoute
+    })
+
     const filteredNavLinks = computed(() => getFilteredNavLinks(hasPremiumPlan.value))
 
     const goToProfile = () => {
@@ -121,9 +128,41 @@ export default {
       }
     }
 
-    onMounted(() => {
+    const handleGoogleAuth = async () => {
+      // Проверяем URL на наличие параметров авторизации
+      const urlParams = new URLSearchParams(window.location.search)
+      const authSuccess = urlParams.get('auth') === 'success'
+
+      if (authSuccess || document.referrer.includes('google')) {
+        if (authSuccess) {
+          window.history.replaceState({}, document.title, window.location.pathname)
+        }
+
+        await syncWithApi()
+
+        const userResponse = await fetch('/auth/user', {
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          credentials: 'include'
+        })
+
+        if (userResponse.ok) {
+          const data = await userResponse.json()
+          if (data.authenticated && data.user) {
+            updateUser(data.user)
+            success('Добро пожаловать!')
+          }
+        }
+      }
+    }
+
+    onMounted(async () => {
       registerEventListeners()
       setupGlobalNotification()
+      await handleGoogleAuth()
+      await syncWithApi()
     })
 
     onUnmounted(() => {

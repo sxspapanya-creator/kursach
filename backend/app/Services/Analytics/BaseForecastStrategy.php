@@ -7,9 +7,8 @@ abstract class BaseForecastStrategy implements ForecastMethodInterface
 {
     protected function constrainForecast(array $forecast, float $lastValue): array
     {
-        $minValue = $lastValue * 0.3;
-        $maxValue = $lastValue * 2.0;
-        return array_map(fn($v) => max($minValue, min($maxValue, $v)), $forecast);
+        // Просто защита от отрицательных значений, без искусственных границ
+        return array_map(fn($v) => max(0, $v), $forecast);
     }
 
     protected function smoothForecast(array $forecast): array
